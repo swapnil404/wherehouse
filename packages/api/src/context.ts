@@ -1,7 +1,7 @@
-import { auth } from "@my-better-t-app/auth";
+import { createAuth } from "@wherehouse/auth";
 
 export async function createContext({ req }: { req: Request }) {
-  const session = await auth.api.getSession({
+  const session = await createAuth().api.getSession({
     headers: req.headers,
   });
   return {

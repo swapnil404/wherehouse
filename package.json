@@ -1,5 +1,5 @@
 {
-  "name": "my-better-t-app",
+  "name": "wherehouse",
   "private": true,
   "workspaces": {
     "packages": [
@@ -30,19 +30,22 @@
     "build": "turbo run build",
     "check-types": "turbo run check-types",
     "dev:web": "turbo run dev -F web --",
-    "db:push": "turbo run db:push -F @my-better-t-app/db --",
-    "db:studio": "turbo run db:studio -F @my-better-t-app/db --",
-    "db:generate": "turbo run db:generate -F @my-better-t-app/db --",
-    "db:migrate": "turbo run db:migrate -F @my-better-t-app/db --"
+    "db:push": "turbo run db:push -F @wherehouse/db --",
+    "db:studio": "turbo run db:studio -F @wherehouse/db --",
+    "db:generate": "turbo run db:generate -F @wherehouse/db --",
+    "db:migrate": "turbo run db:migrate -F @wherehouse/db --",
+    "deploy": "turbo run deploy -F @wherehouse/infra --",
+    "destroy": "turbo run destroy -F @wherehouse/infra --"
   },
   "dependencies": {
-    "@my-better-t-app/env": "workspace:*",
+    "@wherehouse/env": "workspace:*",
     "dotenv": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {
-    "@my-better-t-app/config": "workspace:*",
+    "@cloudflare/workers-types": "^5.20260728.1",
     "@types/node": "catalog:",
+    "@wherehouse/config": "workspace:*",
     "turbo": "^2.10.12",
     "typescript": "catalog:"
   },

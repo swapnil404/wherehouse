@@ -9,8 +9,8 @@
 {
   "$schema": "https://r2.better-t-stack.dev/schema.json",
   "version": "3.42.2",
-  "createdAt": "2026-09-03T20:14:27.496Z",
-  "reproducibleCommand": "bun create better-t-stack@latest my-better-t-app --frontend tanstack-start --backend self --runtime none --database postgres --orm drizzle --api trpc --auth better-auth --payments none --addons turborepo --examples none --db-setup none --web-deploy none --server-deploy none --git --package-manager bun --install",
+  "createdAt": "2026-09-03T21:01:38.804Z",
+  "reproducibleCommand": "bun create better-t-stack@latest wherehouse --frontend tanstack-start --backend self --runtime none --database postgres --orm drizzle --api trpc --auth better-auth --payments none --addons turborepo --examples none --db-setup none --web-deploy cloudflare --server-deploy none --git --package-manager bun --install",
   "database": "postgres",
   "orm": "drizzle",
   "backend": "self",
@@ -23,6 +23,6 @@
   "packageManager": "bun",
   "dbSetup": "none",
   "api": "trpc",
-  "webDeploy": "none",
+  "webDeploy": "cloudflare",
   "serverDeploy": "none",
 }

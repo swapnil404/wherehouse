@@ -1,5 +1,5 @@
 {
-  "name": "@my-better-t-app/env",
+  "name": "@wherehouse/env",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -13,8 +13,9 @@
     "zod": "catalog:"
   },
   "devDependencies": {
-    "@my-better-t-app/config": "workspace:*",
     "@types/node": "catalog:",
+    "@wherehouse/config": "workspace:*",
+    "@wherehouse/infra": "workspace:*",
     "typescript": "catalog:"
   }
 }

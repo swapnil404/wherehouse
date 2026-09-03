@@ -1,9 +1,9 @@
-import type { AppRouter } from "@my-better-t-app/api/routers/index";
 import { QueryCache, QueryClient } from "@tanstack/react-query";
 import { createRouter as createTanStackRouter } from "@tanstack/react-router";
 import { setupRouterSsrQueryIntegration } from "@tanstack/react-router-ssr-query";
 import { createTRPCClient, httpBatchLink } from "@trpc/client";
 import { createTRPCOptionsProxy } from "@trpc/tanstack-react-query";
+import type { AppRouter } from "@wherehouse/api/routers/index";
 import { toast } from "sonner";
 
 import Loader from "./components/loader";

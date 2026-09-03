@@ -1,6 +1,6 @@
-import { createDb } from "@my-better-t-app/db";
-import * as schema from "@my-better-t-app/db/schema/auth";
-import { env } from "@my-better-t-app/env/server";
+import { createDb } from "@wherehouse/db";
+import * as schema from "@wherehouse/db/schema/auth";
+import { env } from "@wherehouse/env/server";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { tanstackStartCookies } from "better-auth/tanstack-start";
@@ -23,5 +23,3 @@ export function createAuth() {
     plugins: [tanstackStartCookies()],
   });
 }
-
-export const auth = createAuth();

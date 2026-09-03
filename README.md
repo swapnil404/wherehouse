@@ -1,4 +1,4 @@
-# my-better-t-app
+# wherehouse
 
 This project was created with [Better-T-Stack](https://github.com/AmanVarshney01/create-better-t-stack), a modern TypeScript stack that combines React, TanStack Start, Self, TRPC, and more.
 
@@ -62,17 +62,35 @@ npx shadcn@latest add accordion dialog popover sheet table -c packages/ui
 Import shared components like this:
 
 ```tsx
-import { Button } from "@my-better-t-app/ui/components/button";
+import { Button } from "@wherehouse/ui/components/button";
 ```
 
 ### Add app-specific blocks
 
 If you want to add app-specific blocks instead of shared primitives, run the shadcn CLI from `apps/web`.
 
+## Deployment
+
+### Alchemy
+
+- Target: web on Cloudflare
+- Configure provider login: `cd packages/infra && bunx alchemy login --configure`
+- Dev: bun run dev
+- Deploy: bun run deploy
+- Destroy: bun run destroy
+
+`alchemy login --configure` stores the selected Cloudflare, Neon, PlanetScale, and/or Prisma provider profiles under `~/.alchemy`; no provider-specific setup command is required by this scaffold.
+
+Deploys are staged and default to a personal `dev_<username>` stage. For production, run the deploy with an explicit stage from `packages/infra`:
+
+```bash
+cd packages/infra && bunx alchemy deploy --stage production
+```
+
 ## Project Structure
 
 ```
-my-better-t-app/
+wherehouse/
 ├── apps/
 │   └── web/         # Fullstack application (React + TanStack Start)
 ├── packages/

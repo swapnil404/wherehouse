@@ -1,7 +1,7 @@
-import { createContext } from "@my-better-t-app/api/context";
-import { appRouter } from "@my-better-t-app/api/routers/index";
 import { createFileRoute } from "@tanstack/react-router";
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
+import { createContext } from "@wherehouse/api/context";
+import { appRouter } from "@wherehouse/api/routers/index";
 
 function handler({ request }: { request: Request }) {
   return fetchRequestHandler({

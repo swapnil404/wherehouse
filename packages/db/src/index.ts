@@ -1,10 +1,11 @@
-import { env } from "@my-better-t-app/env/server";
-import { drizzle } from "drizzle-orm/node-postgres";
+import { env } from "@wherehouse/env/server";
+import { drizzle } from "drizzle-orm/postgres-js";
+import postgres from "postgres";
 
 import * as schema from "./schema";
 
 export function createDb() {
-  return drizzle(env.DATABASE_URL, { schema });
-}
+  const client = postgres(env.DATABASE_URL, { max: 1 });
 
-export const db = createDb();
+  return drizzle({ client, schema });
+}

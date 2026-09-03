@@ -1,4 +1,5 @@
-import { Button } from "@my-better-t-app/ui/components/button";
+import { Link, useNavigate } from "@tanstack/react-router";
+import { Button } from "@wherehouse/ui/components/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -7,9 +8,8 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@my-better-t-app/ui/components/dropdown-menu";
-import { Skeleton } from "@my-better-t-app/ui/components/skeleton";
-import { Link, useNavigate } from "@tanstack/react-router";
+} from "@wherehouse/ui/components/dropdown-menu";
+import { Skeleton } from "@wherehouse/ui/components/skeleton";
 
 import { authClient } from "@/lib/auth-client";
 

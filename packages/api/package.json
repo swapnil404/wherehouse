@@ -1,5 +1,5 @@
 {
-  "name": "@my-better-t-app/api",
+  "name": "@wherehouse/api",
   "type": "module",
   "exports": {
     ".": {
@@ -11,16 +11,16 @@
   },
   "scripts": {},
   "dependencies": {
-    "@my-better-t-app/auth": "workspace:*",
-    "@my-better-t-app/db": "workspace:*",
-    "@my-better-t-app/env": "workspace:*",
     "@trpc/client": "catalog:",
     "@trpc/server": "catalog:",
+    "@wherehouse/auth": "workspace:*",
+    "@wherehouse/db": "workspace:*",
+    "@wherehouse/env": "workspace:*",
     "dotenv": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {
-    "@my-better-t-app/config": "workspace:*",
+    "@wherehouse/config": "workspace:*",
     "typescript": "catalog:"
   }
 }
