@@ -8,6 +8,7 @@ import z from "zod";
 
 import { authClient } from "@/lib/auth-client";
 
+import GoogleSignInButton from "./google-sign-in-button";
 import Loader from "./loader";
 
 export default function SignUpForm({ onSwitchToSignIn }: { onSwitchToSignIn: () => void }) {
@@ -58,6 +59,14 @@ export default function SignUpForm({ onSwitchToSignIn }: { onSwitchToSignIn: () 
   return (
     <div className="mx-auto w-full mt-10 max-w-md p-6">
       <h1 className="mb-6 text-center text-3xl font-bold">Create Account</h1>
+
+      <GoogleSignInButton />
+
+      <div className="my-4 flex items-center gap-3 text-xs text-muted-foreground">
+        <div className="h-px flex-1 bg-border" />
+        <span>or continue with email</span>
+        <div className="h-px flex-1 bg-border" />
+      </div>
 
       <form
         onSubmit={(e) => {
