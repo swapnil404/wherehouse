@@ -29,6 +29,9 @@
       "cache": false,
       "interactive": true
     },
+    "db:postgis": {
+      "cache": false
+    },
     "db:studio": {
       "cache": false,
       "persistent": true

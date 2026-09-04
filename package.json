@@ -34,6 +34,7 @@
     "db:studio": "turbo run db:studio -F @wherehouse/db --",
     "db:generate": "turbo run db:generate -F @wherehouse/db --",
     "db:migrate": "turbo run db:migrate -F @wherehouse/db --",
+    "db:postgis": "turbo run db:postgis -F @wherehouse/db --",
     "deploy": "turbo run deploy -F @wherehouse/infra --",
     "destroy": "turbo run destroy -F @wherehouse/infra --"
   },
