@@ -81,7 +81,7 @@ OFFLINE, NEVER DEPLOYED                                   (Swapnil)
 
 **The sidecar's OpenAPI schema is the single source of truth.** `bun run gen:geo` generates a typed client from it; tRPC procedures wrap that client and never re-declare response shapes. A change by Megha breaks Swapnil's typecheck immediately rather than at runtime in the demo. Keep `gen:geo` in CI.
 
-Until the sidecar is real it serves fixtures for every endpoint, so nobody is ever blocked on anybody. Full contract in [`spec/api-contract.md`](spec/api-contract.md).
+Until the sidecar is real it serves fixtures for every endpoint, so nobody is ever blocked on anybody.
 
 ### 3.2 Render cold starts — the main operational risk
 
@@ -95,7 +95,9 @@ Render's free tier also caps at **512 MB RAM**. The sidecar must query PostGIS f
 
 ### 3.3 Configuration
 
-See [`spec/env.example`](spec/env.example). The sidecar is a public URL, so the Worker authenticates every request with a shared bearer token — it is not a public API.
+The Workers app needs `DATABASE_URL` (Neon direct, for drizzle-kit migrations), `HYPERDRIVE_ID` (the runtime DB path), `BETTER_AUTH_SECRET` / `BETTER_AUTH_URL`, `GEO_SERVICE_URL`, `GEO_SERVICE_TOKEN`, and `R2_PUBLIC_URL`. The sidecar needs a pooled `DATABASE_URL`, the same `GEO_SERVICE_TOKEN`, and `ALLOWED_ORIGINS`.
+
+The sidecar is a public URL, so the Worker authenticates every request with that shared bearer token — it is not a public API.
 
 ---
 
@@ -145,7 +147,7 @@ Five is the requirement; we ship six.
 
 **Format coverage, honestly accounted for:** *GeoJSON* — POI and all API geometry I/O. *Shapefile* — census, zoning, FEMA via GeoPandas/Fiona. *GeoTIFF* — AQI is IDW-interpolated to a raster, written as GeoTIFF, read back with `rasterio` during scoring; a genuine read path, not a checkbox. *WKT* — EPA point input, plus `areaWkt` accepted on `score.batch` and `hotspots.compute`.
 
-Full DDL in [`spec/schema.sql`](spec/schema.sql).
+DDL and GiST indexes for all six layer tables live in `pipeline/sql/`, applied by the ingest pipeline rather than by Drizzle (§5.4).
 
 ### 5.1 Synthetic competitor dataset
 
@@ -178,7 +180,7 @@ Drizzle has no representation for PostGIS polygons. Rather than fight it:
 
 Geo tables are **not** declared in the Drizzle schema — `drizzle-kit push` would try to drop columns it can't model. TypeScript reads them via `db.execute(sql\`...\`)` with geometry cast to GeoJSON text.
 
-One design note worth keeping: `saved_site.score_snapshot` records what a site scored *under the weights in force at save time*. Without it, a user's saved list silently rewrites itself whenever the model changes and their notes stop matching reality. See [`spec/schema.drizzle.ts`](spec/schema.drizzle.ts).
+One design note worth keeping: `saved_site.score_snapshot` records what a site scored *under the weights in force at save time*. Without it, a user's saved list silently rewrites itself whenever the model changes and their notes stop matching reality.
 
 ---
 
@@ -194,7 +196,9 @@ Owned by Megha. Five endpoints, all under `/v1` with bearer auth:
 | `POST /v1/catchment` | Isochrone bands + catchment population, read from precomputed `cell_reach` |
 | `GET /v1/presets` · `/v1/validate/report` · `/health` | Config, validation metrics, warmup target |
 
-Request/response shapes, error codes, and the reasoning behind weight-independent subscores are in [`spec/api-contract.md`](spec/api-contract.md).
+Exact request/response shapes are defined by the sidecar's OpenAPI schema (§3.1) and generated into the TypeScript client — they are deliberately not duplicated here, because a spec that restates a contract becomes the second place it can be wrong.
+
+Errors return `{error: {code, message, detail}}` with typed codes; an out-of-bounds coordinate returns `POINT_OUT_OF_BOUNDS` carrying the supported bbox, so the UI can say "outside the Austin metro coverage area" instead of showing a stack trace. tRPC maps these onto typed tRPC errors.
 
 ---
 
@@ -245,7 +249,7 @@ Zero competitors can mean an untapped market *or* a market already tried and aba
 s_competition(n) = 100 · exp( -(n - n*)² / (2σ_c²) )
 ```
 
-Retail peaks at 3 competitors within 1 km; warehouse peaks at 0 within 5 km (effectively monotonic decreasing — no agglomeration benefit for logistics); EV charging peaks at 1 within 2 km. Complementary businesses and anchor tenants are **separate features** scoring monotonically positive with decay, not the same feature with a sign flip. Tuned values in [`spec/presets.yaml`](spec/presets.yaml).
+Retail peaks at 3 competitors within 1 km; warehouse peaks at 0 within 5 km (effectively monotonic decreasing — no agglomeration benefit for logistics); EV charging peaks at 1 within 2 km. Complementary businesses and anchor tenants are **separate features** scoring monotonically positive with decay, not the same feature with a sign flip. Tuned values live in `apps/geo/scoring/presets.yaml`.
 
 **Client-side re-scoring.** Because subscores are weight-independent, dragging a weight slider needs no server call — the frontend recomputes `Σ(w_i·s_i)/Σ(w_i)` over the cached subscores of every visible hex and recolors the deck.gl layer. Sub-100 ms, and the scoring *math* still lives only in Python. TypeScript performs one weighted average and nothing else; that constraint is what keeps two languages from drifting into two different models.
 
@@ -387,7 +391,7 @@ Only after §12 is green, in priority order:
 |---|---|---|
 | ≥5 geospatial layers | §5 — six shipped | Swapnil |
 | GeoJSON / Shapefile / GeoTIFF / WKT | §5 — all four with real read paths | Swapnil |
-| Configurable weights | §8.1, `spec/presets.yaml`, live sliders | Megha / Vaid |
+| Configurable weights | §8.1, presets + live sliders | Megha / Vaid |
 | Distance decay functions | §8.2 | Megha |
 | Competitive density analysis | §8.3 — inverted-U | Megha |
 | Threshold constraints | §8.5 | Megha |
@@ -403,7 +407,7 @@ Only after §12 is green, in priority order:
 | Validated vs. expert-labeled sites | §8.6 | Megha |
 | Python · GeoPandas · Shapely · H3 · sklearn | `apps/geo`, `pipeline/` | Megha / Swapnil |
 | FastAPI | `apps/geo` | Megha |
-| PostGIS | §5.4, `spec/schema.sql` | Swapnil |
+| PostGIS | §5.4 — Neon + PostGIS, raw-SQL migrations | Swapnil |
 | Vector tiles + MapLibre | §5.3 — tippecanoe → PMTiles → R2 | Swapnil / Vaid |
 | React frontend + map library | §9 — TanStack Start | Vaid |
 
