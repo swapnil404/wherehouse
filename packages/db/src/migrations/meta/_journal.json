@@ -8,6 +8,13 @@
       "when": 1788469902804,
       "tag": "0000_flashy_wraith",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1788527520430,
+      "tag": "0001_dusty_lord_hawal",
+      "breakpoints": true
     }
   ]
 }
