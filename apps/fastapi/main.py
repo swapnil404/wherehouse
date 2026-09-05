@@ -1,93 +1,99 @@
-# commit type terminal to no seriousThis is the VS code, ma changes commit, and as a main dot p IC Warning house can score wary file we don't have it right nowactually commit no button new klicker so the changes are processed right now describe uploads to Juplot data dot Pins okay second cannot type here like ninety thirty two last time branch bulma commit khune actually committ plass automatic commit thirty muchtion, Depends, Security
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from fastapi.middleware.cors import CORSMiddleware
-import numpy as np
-from scipy.spatial import cKDTree   # for nearest-cell lookup
 # main.py
 import os
+from typing import Dict, List, Optional
 from dotenv import load_dotenv
+load_dotenv()
 
-load_dotenv()   
+from fastapi import FastAPI, HTTPException, Depends, Security
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from scipy.spatial import cKDTree  # for nearest-cell lookup
 
-from model import *
 from data import load_data, get_df
 from scoring import (
     compute_subscores,
     evaluate_constraints,
     composite_score,
     DEFAULT_WEIGHTS,
-    DEFAULT_WEIGHTS_WITH_ML,
+
 )
 
+# ---------- env (must come BEFORE add_middleware) ----------
+API_TOKEN = os.getenv("API_TOKEN")
+CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*").split(",")
+allowed_origins = [o.strip() for o in CORS_ORIGINS]
+
+# ---------- app ----------
 app = FastAPI(
     title="Wherehouse Geo API",
     version="0.3.0",
-    docs_url="/docs",          # interactive Swagger UI
+    docs_url="/docs",
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],       # tighten later
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=allowed_origins,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Authorization", "Content-Type"],
+    allow_credentials=False,
 )
 
 security = HTTPBearer()
 
-# Shared secret (put in env in real deploy)
-API_TOKEN = os.getenv("API_TOKEN")
-CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*").split(",")
 def verify_token(credentials: HTTPAuthorizationCredentials = Security(security)):
     if credentials.credentials != API_TOKEN:
         raise HTTPException(status_code=401, detail="Invalid token")
     return credentials
 
-@app.on_event("startup")
-def startup():
-    load_data()                # load CSV once
-    df = get_df()
-    # Build a fast nearest-neighbour index for lat/lon → cell
-    coords = df[["centroid_lat", "centroid_lon"]].values
-    app.state.kdtree = cKDTree(coords)
-    app.state.df = df
-    print(f"Loaded {len(df):,} cells")
+# ---------- schemas (inlined, was from model import *) ----------
+class Point(BaseModel):
+    lat: float
+    lon: float
 
-@app.get("/health")
-def health():
-    return {"status": "ok"}
+class ScoreRequest(BaseModel):
+    point: Point
+    weights: Optional[Dict[str, float]] = None
 
-@app.get("/v1/presets")
-def get_presets(_: str = Depends(verify_token)):
-    return {
-        "warehouse": DEFAULT_WEIGHTS,
-        "warehouse_with_ml": DEFAULT_WEIGHTS_WITH_ML,
-    }
+class ConstraintResult(BaseModel):
+    feature: str
+    op: str
+    value: float
+    actual: float
+    passed: bool
+    message: str = ""
 
-@app.post("/v1/score", response_model=ScoreResponse)
-def score_point(
-    req: ScoreRequest,
-    _: str = Depends(verify_token),
-):
+class ScoreResponse(BaseModel):
+    h3_index: str
+    lat: float
+    lon: float
+    score: float
+    eligible: bool
+    subscores: Dict[str, float]
+    constraints: List[ConstraintResult]
+    is_hotspot: bool = False
+    is_underserved: bool = False
+    cluster_id: int = -1
+
+class BatchScoreRequest(BaseModel):
+    points: List[Point]
+    weights: Optional[Dict[str, float]] = None
+
+class BatchScoreResponse(BaseModel):
+    results: List[ScoreResponse]
+
+# ---------- core logic ----------
+def _score_single(point: Point, weights: Optional[Dict[str, float]]) -> ScoreResponse:
     df = app.state.df
     tree = app.state.kdtree
 
-    # 1. Find nearest H3 cell
-    dist, idx = tree.query([req.point.lat, req.point.lon])
+    dist, idx = tree.query([point.lat, point.lon])
     row = df.iloc[idx]
 
-    # 2. Compute (or reuse) subscores
     subs = compute_subscores(row)
-    if req.include_ml:
-        # you already have s_ml in the dataframe from training
-        subs["ml"] = float(row.get("s_ml", 0))
+    w = weights or DEFAULT_WEIGHTS
+    score = composite_score(subs, w)
 
-    # 3. Weights
-    weights = req.weights or (DEFAULT_WEIGHTS_WITH_ML if req.include_ml else DEFAULT_WEIGHTS)
-
-    # 4. Composite
-    score = composite_score(subs, weights)
-
-    # 5. Constraints
     constraints = evaluate_constraints(row)
     eligible = all(c["pass"] for c in constraints)
 
@@ -114,21 +120,31 @@ def score_point(
         cluster_id=int(row.get("cluster_id", -1)),
     )
 
+@app.on_event("startup")
+def startup():
+    load_data()
+    df = get_df()
+    coords = df[["centroid_lat", "centroid_lon"]].values
+    app.state.kdtree = cKDTree(coords)
+    app.state.df = df
+    print(f"Loaded {len(df):,} cells")
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+@app.get("/v1/presets")
+def get_presets(_: str = Depends(verify_token)):
+    return {"warehouse": DEFAULT_WEIGHTS}
+
+@app.post("/v1/score", response_model=ScoreResponse)
+def score_point(req: ScoreRequest, _: str = Depends(verify_token)):
+    return _score_single(req.point, req.weights)
+
 @app.post("/v1/score/batch", response_model=BatchScoreResponse)
-def score_batch(
-    req: BatchScoreRequest,
-    _: str = Depends(verify_token),
-):
+def score_batch(req: BatchScoreRequest, _: str = Depends(verify_token)):
     if not req.points:
         raise HTTPException(400, "points is required for now")
-
-    results = []
-    for p in req.points:
-        # reuse the single-point logic
-        single = score_point(
-            ScoreRequest(point=p, weights=req.weights, include_ml=req.include_ml),
-            _="dummy",   # auth already checked
-        )
-        results.append(single)
-
-    return BatchScoreResponse(results=results)
+    return BatchScoreResponse(
+        results=[_score_single(p, req.weights) for p in req.points]
+    )
