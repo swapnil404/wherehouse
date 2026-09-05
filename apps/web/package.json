@@ -24,6 +24,7 @@
     "better-auth": "catalog:",
     "dotenv": "catalog:",
     "lucide-react": "catalog:",
+    "maplibre-gl": "^5.24.0",
     "next-themes": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
