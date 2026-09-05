@@ -1,10 +1,17 @@
 import { Button } from "@wherehouse/ui/components/button";
+import { cn } from "@wherehouse/ui/lib/utils";
 import { useState } from "react";
 import { toast } from "sonner";
 
 import { authClient } from "@/lib/auth-client";
 
-export default function GoogleSignInButton() {
+export default function GoogleSignInButton({
+  label = "Login with Google",
+  className,
+}: {
+  label?: string;
+  className?: string;
+}) {
   const [isPending, setIsPending] = useState(false);
 
   const signInWithGoogle = async () => {
@@ -27,11 +34,11 @@ export default function GoogleSignInButton() {
     <Button
       type="button"
       variant="outline"
-      className="w-full"
+      className={cn("w-full", className)}
       disabled={isPending}
       onClick={signInWithGoogle}
     >
-      {isPending ? "Connecting to Google..." : "Continue with Google"}
+      {isPending ? "Connecting to Google..." : label}
     </Button>
   );
 }

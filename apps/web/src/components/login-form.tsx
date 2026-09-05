@@ -26,11 +26,11 @@ import { authForm } from "./auth-form-styles";
 import GoogleSignInButton from "./google-sign-in-button";
 import Loader from "./loader";
 
-export function SignUpForm({
-  onSwitchToSignIn,
+export function LoginForm({
+  onSwitchToSignUp,
   className,
   ...props
-}: React.ComponentProps<"div"> & { onSwitchToSignIn: () => void }) {
+}: React.ComponentProps<"div"> & { onSwitchToSignUp: () => void }) {
   const navigate = useNavigate({
     from: "/",
   });
@@ -38,23 +38,21 @@ export function SignUpForm({
 
   const form = useForm({
     defaultValues: {
-      name: "",
       email: "",
       password: "",
     },
     onSubmit: async ({ value }) => {
-      await authClient.signUp.email(
+      await authClient.signIn.email(
         {
           email: value.email,
           password: value.password,
-          name: value.name,
         },
         {
           onSuccess: () => {
             navigate({
               to: "/dashboard",
             });
-            toast.success("Sign up successful");
+            toast.success("Sign in successful");
           },
           onError: (error) => {
             toast.error(error.error.message || error.error.statusText);
@@ -64,7 +62,6 @@ export function SignUpForm({
     },
     validators: {
       onSubmit: z.object({
-        name: z.string().min(2, "Name must be at least 2 characters"),
         email: z.email("Invalid email address"),
         password: z.string().min(8, "Password must be at least 8 characters"),
       }),
@@ -79,9 +76,9 @@ export function SignUpForm({
     <div className={cn("flex flex-col gap-6", className)} {...props}>
       <Card className={authForm.card}>
         <CardHeader>
-          <CardTitle className={authForm.title}>Create your account</CardTitle>
+          <CardTitle className={authForm.title}>Login to your account</CardTitle>
           <CardDescription className={authForm.description}>
-            Enter your details below to create your account
+            Enter your email below to login to your account
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -93,26 +90,6 @@ export function SignUpForm({
             }}
           >
             <FieldGroup className={authForm.fieldGroup}>
-              <form.Field name="name">
-                {(field) => (
-                  <Field data-invalid={field.state.meta.errors.length > 0 || undefined}>
-                    <FieldLabel className={authForm.label} htmlFor={field.name}>
-                      Name
-                    </FieldLabel>
-                    <Input
-                      id={field.name}
-                      name={field.name}
-                      placeholder="Ada Lovelace"
-                      className={authForm.input}
-                      value={field.state.value}
-                      onBlur={field.handleBlur}
-                      onChange={(e) => field.handleChange(e.target.value)}
-                    />
-                    <FieldError className={authForm.error} errors={field.state.meta.errors} />
-                  </Field>
-                )}
-              </form.Field>
-
               <form.Field name="email">
                 {(field) => (
                   <Field data-invalid={field.state.meta.errors.length > 0 || undefined}>
@@ -137,9 +114,17 @@ export function SignUpForm({
               <form.Field name="password">
                 {(field) => (
                   <Field data-invalid={field.state.meta.errors.length > 0 || undefined}>
-                    <FieldLabel className={authForm.label} htmlFor={field.name}>
-                      Password
-                    </FieldLabel>
+                    <div className="flex items-center">
+                      <FieldLabel className={authForm.label} htmlFor={field.name}>
+                        Password
+                      </FieldLabel>
+                      <a
+                        href="#"
+                        className="ml-auto inline-block text-sm underline-offset-4 hover:underline"
+                      >
+                        Forgot your password?
+                      </a>
+                    </div>
                     <Input
                       id={field.name}
                       name={field.name}
@@ -149,9 +134,6 @@ export function SignUpForm({
                       onBlur={field.handleBlur}
                       onChange={(e) => field.handleChange(e.target.value)}
                     />
-                    <FieldDescription className={authForm.footnote}>
-                      Must be at least 8 characters.
-                    </FieldDescription>
                     <FieldError className={authForm.error} errors={field.state.meta.errors} />
                   </Field>
                 )}
@@ -170,21 +152,21 @@ export function SignUpForm({
                       className={authForm.button}
                       disabled={!canSubmit || isSubmitting}
                     >
-                      {isSubmitting ? "Submitting..." : "Create account"}
+                      {isSubmitting ? "Submitting..." : "Login"}
                     </Button>
                   )}
                 </form.Subscribe>
 
-                <GoogleSignInButton label="Sign up with Google" className={authForm.button} />
+                <GoogleSignInButton label="Login with Google" className={authForm.button} />
 
                 <FieldDescription className={cn("text-center", authForm.footnote)}>
-                  Already have an account?{" "}
+                  Don&apos;t have an account?{" "}
                   <button
                     type="button"
-                    onClick={onSwitchToSignIn}
+                    onClick={onSwitchToSignUp}
                     className="underline underline-offset-4"
                   >
-                    Sign in
+                    Sign up
                   </button>
                 </FieldDescription>
               </Field>
