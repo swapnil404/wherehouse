@@ -1,8 +1,13 @@
-from fastapi import FastAPI, HTTPException, Depends, Security
+# commit type terminal to no seriousThis is the VS code, ma changes commit, and as a main dot p IC Warning house can score wary file we don't have it right nowactually commit no button new klicker so the changes are processed right now describe uploads to Juplot data dot Pins okay second cannot type here like ninety thirty two last time branch bulma commit khune actually committ plass automatic commit thirty muchtion, Depends, Security
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
 import numpy as np
 from scipy.spatial import cKDTree   # for nearest-cell lookup
+# main.py
+import os
+from dotenv import load_dotenv
+
+load_dotenv()   
 
 from model import *
 from data import load_data, get_df
@@ -30,8 +35,8 @@ app.add_middleware(
 security = HTTPBearer()
 
 # Shared secret (put in env in real deploy)
-API_TOKEN = "your-secret-token-here"
-
+API_TOKEN = os.getenv("API_TOKEN")
+CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*").split(",")
 def verify_token(credentials: HTTPAuthorizationCredentials = Security(security)):
     if credentials.credentials != API_TOKEN:
         raise HTTPException(status_code=401, detail="Invalid token")
