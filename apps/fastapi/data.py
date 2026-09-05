@@ -3,7 +3,7 @@ import pandas as pd
 
 _df = None
 
-def load_data(csv_path: str = "austin_warehouse_sites_h3 (1) (1).csv"):
+def load_data(csv_path: str = "project.csv"):
     global _df
     if _df is None:
         _df = pd.read_csv(csv_path)
