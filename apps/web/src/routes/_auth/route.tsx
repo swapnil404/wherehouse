@@ -1,5 +1,6 @@
 import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
 
+import Header from "@/components/header";
 import { getUser } from "@/functions/get-user";
 
 export const Route = createFileRoute("/_auth")({
@@ -23,5 +24,10 @@ export const Route = createFileRoute("/_auth")({
 });
 
 function AuthLayout() {
-  return <Outlet />;
+  return (
+    <div className="grid h-full grid-rows-[auto_1fr]">
+      <Header />
+      <Outlet />
+    </div>
+  );
 }
