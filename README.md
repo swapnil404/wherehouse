@@ -41,6 +41,25 @@ Open [http://localhost:3001](http://localhost:3001) in your browser to see the f
 
 The Python scoring API lives in `apps/fastapi` and runs separately from the web application.
 
+With [`just`](https://github.com/casey/just) installed, set up and start the API from the repository root:
+
+```bash
+just geo-setup
+just geo-dev
+```
+
+After both applications are configured, start them together with `just dev`.
+
+`just dev` runs Turbo and Uvicorn in the same terminal, so their interactive output can overlap even when both services are healthy. For separate, easier-to-read logs, run `just web-dev` and `just geo-dev` in two terminals. Press `Ctrl+C` to stop either command.
+
+To check a running API:
+
+```bash
+just geo-health
+```
+
+The equivalent manual setup is:
+
 ```bash
 cd apps/fastapi
 python -m venv .venv
