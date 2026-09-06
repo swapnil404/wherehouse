@@ -8,11 +8,11 @@ from typing import Dict, List, Any
 
 DEFAULT_WEIGHTS = {
     "demographics": 0.06,
-    "transportation": 0.28,
+    "transport": 0.28,
     "poi": 0.22,
     "zoning": 0.36,
     "flood": 0.06,
-    "air_quality": 0.02,
+    "aqi": 0.02,
 }
 
 
@@ -44,11 +44,11 @@ def compute_subscores(row) -> Dict[str, float]:
 
     return {
         "demographics": round(float(np.clip(demo, 0, 100)), 2),
-        "transportation": round(float(np.clip(trans, 0, 100)), 2),
+        "transport": round(float(np.clip(trans, 0, 100)), 2),
         "poi": round(float(np.clip(poi, 0, 100)), 2),
         "zoning": round(float(np.clip(zoning, 0, 100)), 2),
         "flood": round(float(np.clip(flood, 0, 100)), 2),
-        "air_quality": round(float(np.clip(air, 0, 100)), 2),
+        "aqi": round(float(np.clip(air, 0, 100)), 2),
     }
 
 
@@ -58,46 +58,42 @@ def evaluate_constraints(row) -> List[Dict[str, Any]]:
     # 1. Must not be in SFHA
     actual = bool(row["in_sfha"])
     constraints.append({
-        "feature": "in_sfha",
-        "op": "==",
-        "value": False,
+        "id": "in_sfha",
+        "label": "Must not be inside SFHA (100-year floodplain)",
         "actual": actual,
+        "required": False,
         "pass": actual is False,
-        "message": "Must not be inside SFHA (100-year floodplain)"
     })
 
     # 2. Highway distance
     actual = float(row["highway_distance_km"])
     constraints.append({
-        "feature": "highway_distance_km",
-        "op": "<=",
-        "value": 15.0,
+        "id": "highway_distance_km",
+        "label": f"Highway distance {actual:.1f} km (max 15 km)",
         "actual": round(actual, 2),
+        "required": 15.0,
         "pass": actual <= 15.0,
-        "message": f"Highway distance {actual:.1f} km (max 15 km)"
     })
 
     # 3. Zone class
     actual = row["dominant_zone_class"]
-    allowed = {"industrial", "commercial"}
+    allowed = ["industrial", "commercial"]
     constraints.append({
-        "feature": "dominant_zone_class",
-        "op": "in",
-        "value": list(allowed),
+        "id": "dominant_zone_class",
+        "label": f"Zone class '{actual}' (prefer industrial/commercial)",
         "actual": actual,
+        "required": allowed,
         "pass": actual in allowed,
-        "message": f"Zone class '{actual}' (prefer industrial/commercial)"
     })
 
     # 4. Industrial area percentage
     actual = float(row["industrial_area_pct"])
     constraints.append({
-        "feature": "industrial_area_pct",
-        "op": ">=",
-        "value": 10.0,
+        "id": "industrial_area_pct",
+        "label": f"Industrial area {actual:.1f}% (min 10%)",
         "actual": round(actual, 1),
+        "required": 10.0,
         "pass": actual >= 10.0,
-        "message": f"Industrial area {actual:.1f}% (min 10%)"
     })
 
     return constraints
