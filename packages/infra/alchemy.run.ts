@@ -20,7 +20,7 @@ export const database = Cloudflare.Hyperdrive.Connection("database", {
 export const web = Cloudflare.Website.Vite("web", {
   rootDir: "../../apps/web",
   compatibility: {
-    flags: ["nodejs_compat"],
+    flags: ["nodejs_compat", "global_fetch_strictly_public"],
   },
   env: {
     HYPERDRIVE: database,
