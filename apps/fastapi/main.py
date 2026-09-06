@@ -2,13 +2,13 @@
 from contextlib import asynccontextmanager
 from typing import Dict, Optional
 
+import h3
 from fastapi import FastAPI, HTTPException, Depends, Security
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
-from scipy.spatial import cKDTree  # for nearest-cell lookup
 
 from config import ALLOWED_ORIGINS, GEO_SERVICE_TOKEN
-from data import load_data, get_df
+from data import get_cell_index, get_df, get_h3_resolution, load_data
 from schemas import (
     BatchScoreRequest,
     BatchScoreResponse,
@@ -24,16 +24,16 @@ from scoring import (
     DEFAULT_WEIGHTS,
 )
 
+MAX_BATCH_POINTS = 5000
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     load_data()                # load CSV once
-    df = get_df()
-    # Build a fast nearest-neighbour index for lat/lon → cell
-    coords = df[["centroid_lat", "centroid_lon"]].values
-    app.state.kdtree = cKDTree(coords)
-    app.state.df = df
-    print(f"Loaded {len(df):,} cells")
+    app.state.df = get_df()
+    app.state.h3_res = get_h3_resolution()
+    app.state.cell_index = get_cell_index()  # exact h3_index -> row
+    print(f"Loaded {len(app.state.df):,} cells at H3 res {app.state.h3_res}")
     yield
 
 
@@ -62,13 +62,34 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Security(security))
     return credentials
 
 
+def _lookup_row(point: Point):
+    """Exact H3 containing-cell lookup. Raises 422 when uncovered."""
+    try:
+        cell = h3.latlng_to_cell(point.lat, point.lon, app.state.h3_res)
+    except ValueError:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "POINT_OUT_OF_BOUNDS",
+                "message": f"Point ({point.lat}, {point.lon}) is out of bounds.",
+            },
+        )
+    pos = app.state.cell_index.get(cell)
+    if pos is None:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "POINT_OUT_OF_BOUNDS",
+                "message": f"Point ({point.lat}, {point.lon}) is outside the covered area.",
+                "cell": cell,
+            },
+        )
+    return app.state.df.iloc[pos]
+
+
 # ---------- core logic ----------
 def _score_single(point: Point, weights: Optional[Dict[str, float]]) -> ScoreResponse:
-    df = app.state.df
-    tree = app.state.kdtree
-
-    dist, idx = tree.query([point.lat, point.lon])
-    row = df.iloc[idx]
+    row = _lookup_row(point)
 
     subs = compute_subscores(row)
     w = weights or DEFAULT_WEIGHTS
@@ -116,6 +137,14 @@ def score_point(req: ScoreRequest, _: str = Depends(verify_token)):
 def score_batch(req: BatchScoreRequest, _: str = Depends(verify_token)):
     if not req.points:
         raise HTTPException(400, "points is required for now")
+    if len(req.points) > MAX_BATCH_POINTS:
+        raise HTTPException(
+            status_code=413,
+            detail={
+                "code": "BATCH_LIMIT_EXCEEDED",
+                "message": f"Batch limited to {MAX_BATCH_POINTS} points per request (got {len(req.points)}).",
+            },
+        )
     return BatchScoreResponse(
         results=[_score_single(p, req.weights) for p in req.points]
     )
