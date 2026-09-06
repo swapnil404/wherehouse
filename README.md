@@ -77,6 +77,22 @@ On Windows PowerShell, activate the virtual environment with:
 
 Set `GEO_SERVICE_TOKEN` and `ALLOWED_ORIGINS` in `apps/fastapi/.env` before starting the API. The health endpoint is available at [http://localhost:8000/health](http://localhost:8000/health), and the OpenAPI interface is available at [http://localhost:8000/docs](http://localhost:8000/docs).
 
+Set `GEO_SERVICE_URL` and `GEO_SERVICE_TOKEN` in `apps/web/.env`. Both applications must use the same token.
+
+The TanStack server exposes these tRPC procedures:
+
+- `geo.presets`
+- `geo.score`
+- `geo.scoreBatch`
+
+Run this command after a FastAPI schema change:
+
+```bash
+bun run gen:geo
+```
+
+This command exports `apps/fastapi/openapi.json`. It then updates the generated TypeScript types in `packages/api/src/geo`.
+
 ## UI Customization
 
 React web apps in this stack share shadcn/ui primitives through `packages/ui`.
@@ -149,6 +165,7 @@ wherehouse/
 - `bun run build`: Build all applications
 - `bun run dev:web`: Start only the web application
 - `bun run check-types`: Check TypeScript types across all apps
+- `bun run gen:geo`: Export the FastAPI contract and generate TypeScript types
 - `bun run db:generate`: Generate database client/types
 - `bun run db:migrate`: Run database migrations
 - `bun run db:studio`: Open database studio UI

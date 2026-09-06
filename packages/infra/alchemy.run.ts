@@ -32,6 +32,8 @@ export const web = Cloudflare.Website.Vite("web", {
     GOOGLE_CLIENT_SECRET: Config.redacted("GOOGLE_CLIENT_SECRET").pipe(
       Config.withDefault(Redacted.make("")),
     ),
+    GEO_SERVICE_URL: Config.string("GEO_SERVICE_URL"),
+    GEO_SERVICE_TOKEN: Config.redacted("GEO_SERVICE_TOKEN"),
   },
   dev: {
     port: 3001,
