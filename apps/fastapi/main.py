@@ -1,93 +1,100 @@
-# commit type terminal to no seriousThis is the VS code, ma changes commit, and as a main dot p IC Warning house can score wary file we don't have it right nowactually commit no button new klicker so the changes are processed right now describe uploads to Juplot data dot Pins okay second cannot type here like ninety thirty two last time branch bulma commit khune actually committ plass automatic commit thirty muchtion, Depends, Security
+# main.py
+from contextlib import asynccontextmanager
+from typing import Dict, Optional
+
+import h3
+from fastapi import FastAPI, HTTPException, Depends, Security
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
-import numpy as np
-from scipy.spatial import cKDTree   # for nearest-cell lookup
-# main.py
-import os
-from dotenv import load_dotenv
 
-load_dotenv()   
-
-from model import *
-from data import load_data, get_df
+from config import ALLOWED_ORIGINS, GEO_SERVICE_TOKEN
+from data import get_cell_index, get_df, get_h3_resolution, load_data
+from schemas import (
+    BatchScoreRequest,
+    BatchScoreResponse,
+    ConstraintResult,
+    Point,
+    ScoreRequest,
+    ScoreResponse,
+)
 from scoring import (
     compute_subscores,
     evaluate_constraints,
     composite_score,
     DEFAULT_WEIGHTS,
-    DEFAULT_WEIGHTS_WITH_ML,
 )
 
+MAX_BATCH_POINTS = 5000
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    load_data()                # load CSV once
+    app.state.df = get_df()
+    app.state.h3_res = get_h3_resolution()
+    app.state.cell_index = get_cell_index()  # exact h3_index -> row
+    print(f"Loaded {len(app.state.df):,} cells at H3 res {app.state.h3_res}")
+    yield
+
+
+# ---------- app ----------
 app = FastAPI(
     title="Wherehouse Geo API",
     version="0.3.0",
-    docs_url="/docs",          # interactive Swagger UI
+    docs_url="/docs",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],       # tighten later
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=ALLOWED_ORIGINS,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Authorization", "Content-Type"],
+    allow_credentials=False,
 )
 
 security = HTTPBearer()
 
-# Shared secret (put in env in real deploy)
-API_TOKEN = os.getenv("API_TOKEN")
-CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*").split(",")
+
 def verify_token(credentials: HTTPAuthorizationCredentials = Security(security)):
-    if credentials.credentials != API_TOKEN:
+    if credentials.credentials != GEO_SERVICE_TOKEN:
         raise HTTPException(status_code=401, detail="Invalid token")
     return credentials
 
-@app.on_event("startup")
-def startup():
-    load_data()                # load CSV once
-    df = get_df()
-    # Build a fast nearest-neighbour index for lat/lon → cell
-    coords = df[["centroid_lat", "centroid_lon"]].values
-    app.state.kdtree = cKDTree(coords)
-    app.state.df = df
-    print(f"Loaded {len(df):,} cells")
 
-@app.get("/health")
-def health():
-    return {"status": "ok"}
+def _lookup_row(point: Point):
+    """Exact H3 containing-cell lookup. Raises 422 when uncovered."""
+    try:
+        cell = h3.latlng_to_cell(point.lat, point.lon, app.state.h3_res)
+    except ValueError:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "POINT_OUT_OF_BOUNDS",
+                "message": f"Point ({point.lat}, {point.lon}) is out of bounds.",
+            },
+        )
+    pos = app.state.cell_index.get(cell)
+    if pos is None:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "POINT_OUT_OF_BOUNDS",
+                "message": f"Point ({point.lat}, {point.lon}) is outside the covered area.",
+                "cell": cell,
+            },
+        )
+    return app.state.df.iloc[pos]
 
-@app.get("/v1/presets")
-def get_presets(_: str = Depends(verify_token)):
-    return {
-        "warehouse": DEFAULT_WEIGHTS,
-        "warehouse_with_ml": DEFAULT_WEIGHTS_WITH_ML,
-    }
 
-@app.post("/v1/score", response_model=ScoreResponse)
-def score_point(
-    req: ScoreRequest,
-    _: str = Depends(verify_token),
-):
-    df = app.state.df
-    tree = app.state.kdtree
+# ---------- core logic ----------
+def _score_single(point: Point, weights: Optional[Dict[str, float]]) -> ScoreResponse:
+    row = _lookup_row(point)
 
-    # 1. Find nearest H3 cell
-    dist, idx = tree.query([req.point.lat, req.point.lon])
-    row = df.iloc[idx]
-
-    # 2. Compute (or reuse) subscores
     subs = compute_subscores(row)
-    if req.include_ml:
-        # you already have s_ml in the dataframe from training
-        subs["ml"] = float(row.get("s_ml", 0))
+    w = weights or DEFAULT_WEIGHTS
+    score = composite_score(subs, w)
 
-    # 3. Weights
-    weights = req.weights or (DEFAULT_WEIGHTS_WITH_ML if req.include_ml else DEFAULT_WEIGHTS)
-
-    # 4. Composite
-    score = composite_score(subs, weights)
-
-    # 5. Constraints
     constraints = evaluate_constraints(row)
     eligible = all(c["pass"] for c in constraints)
 
@@ -100,35 +107,44 @@ def score_point(
         subscores=subs,
         constraints=[
             ConstraintResult(
-                feature=c["feature"],
-                op=c["op"],
-                value=c["value"],
+                id=c["id"],
+                label=c["label"],
                 actual=c["actual"],
-                passed=c["pass"],
-                message=c["message"],
+                required=c["required"],
+                pass_=c["pass"],
             )
             for c in constraints
         ],
-        is_hotspot=bool(row.get("is_hotspot", False)),
-        is_underserved=bool(row.get("is_underserved", False)),
-        cluster_id=int(row.get("cluster_id", -1)),
     )
 
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
+@app.get("/v1/presets")
+def get_presets(_: str = Depends(verify_token)):
+    return {"warehouse": DEFAULT_WEIGHTS}
+
+
+@app.post("/v1/score", response_model=ScoreResponse)
+def score_point(req: ScoreRequest, _: str = Depends(verify_token)):
+    return _score_single(req.point, req.weights)
+
+
 @app.post("/v1/score/batch", response_model=BatchScoreResponse)
-def score_batch(
-    req: BatchScoreRequest,
-    _: str = Depends(verify_token),
-):
+def score_batch(req: BatchScoreRequest, _: str = Depends(verify_token)):
     if not req.points:
         raise HTTPException(400, "points is required for now")
-
-    results = []
-    for p in req.points:
-        # reuse the single-point logic
-        single = score_point(
-            ScoreRequest(point=p, weights=req.weights, include_ml=req.include_ml),
-            _="dummy",   # auth already checked
+    if len(req.points) > MAX_BATCH_POINTS:
+        raise HTTPException(
+            status_code=413,
+            detail={
+                "code": "BATCH_LIMIT_EXCEEDED",
+                "message": f"Batch limited to {MAX_BATCH_POINTS} points per request (got {len(req.points)}).",
+            },
         )
-        results.append(single)
-
-    return BatchScoreResponse(results=results)
+    return BatchScoreResponse(
+        results=[_score_single(p, req.weights) for p in req.points]
+    )

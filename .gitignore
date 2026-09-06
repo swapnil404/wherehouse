@@ -3,6 +3,14 @@ node_modules
 .pnp
 .pnp.js
 
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+*.egg-info/
+
 # Build outputs
 dist
 build
@@ -19,7 +27,6 @@ local.db-*
 
 # IDEs and editors
 .vscode/*
-!.vscode/settings.json
 !.vscode/tasks.json
 !.vscode/launch.json
 !.vscode/extensions.json

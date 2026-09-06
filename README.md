@@ -37,6 +37,46 @@ bun run dev
 
 Open [http://localhost:3001](http://localhost:3001) in your browser to see the fullstack application.
 
+## FastAPI Sidecar
+
+The Python scoring API lives in `apps/fastapi` and runs separately from the web application.
+
+With [`just`](https://github.com/casey/just) installed, set up and start the API from the repository root:
+
+```bash
+just geo-setup
+just geo-dev
+```
+
+After both applications are configured, start them together with `just dev`.
+
+`just dev` runs Turbo and Uvicorn in the same terminal, so their interactive output can overlap even when both services are healthy. For separate, easier-to-read logs, run `just web-dev` and `just geo-dev` in two terminals. Press `Ctrl+C` to stop either command.
+
+To check a running API:
+
+```bash
+just geo-health
+```
+
+The equivalent manual setup is:
+
+```bash
+cd apps/fastapi
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+uvicorn main:app --reload --port 8000
+```
+
+On Windows PowerShell, activate the virtual environment with:
+
+```powershell
+.venv\Scripts\Activate.ps1
+```
+
+Set `GEO_SERVICE_TOKEN` and `ALLOWED_ORIGINS` in `apps/fastapi/.env` before starting the API. The health endpoint is available at [http://localhost:8000/health](http://localhost:8000/health), and the OpenAPI interface is available at [http://localhost:8000/docs](http://localhost:8000/docs).
+
 ## UI Customization
 
 React web apps in this stack share shadcn/ui primitives through `packages/ui`.
@@ -81,12 +121,21 @@ Deploys are staged and default to a personal `dev_<username>` stage. For product
 cd packages/infra && bunx alchemy deploy --stage production
 ```
 
+### Render
+
+Configure the FastAPI sidecar with `apps/fastapi` as its root directory.
+
+- Build command: `pip install -r requirements.txt`
+- Start command: `uvicorn main:app --host 0.0.0.0 --port $PORT`
+- Required environment variables: `GEO_SERVICE_TOKEN` and `ALLOWED_ORIGINS`
+
 ## Project Structure
 
 ```
 wherehouse/
 ├── apps/
-│   └── web/         # Fullstack application (React + TanStack Start)
+│   ├── web/         # Fullstack application (React + TanStack Start)
+│   └── fastapi/     # Python scoring API
 ├── packages/
 │   ├── ui/          # Shared shadcn/ui components and styles
 │   ├── api/         # API layer / business logic
