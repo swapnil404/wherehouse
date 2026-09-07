@@ -23,7 +23,7 @@ export const Route = createRootRouteWithContext<RouterAppContext>()({
         content: "width=device-width, initial-scale=1",
       },
       {
-        title: "My App",
+        title: "Wherehouse",
       },
     ],
     links: [
@@ -48,8 +48,12 @@ function RootDocument() {
           <Outlet />
         </div>
         <Toaster richColors />
-        <TanStackRouterDevtools position="bottom-left" />
-        <ReactQueryDevtools position="bottom" buttonPosition="bottom-right" />
+        {import.meta.env.DEV ? (
+          <>
+            <TanStackRouterDevtools position="bottom-left" />
+            <ReactQueryDevtools position="bottom" buttonPosition="bottom-right" />
+          </>
+        ) : null}
         <Scripts />
       </body>
     </html>

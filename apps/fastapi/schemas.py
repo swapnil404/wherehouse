@@ -1,17 +1,22 @@
 """Pydantic schemas for the Wherehouse Geo API."""
 
-from typing import Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Literal, Optional
+
 from pydantic import BaseModel, ConfigDict, Field
+
+WeightName = Literal["demographics", "transport", "poi", "zoning", "flood", "aqi"]
+WeightValue = Annotated[float, Field(ge=0, allow_inf_nan=False)]
+Weights = Dict[WeightName, WeightValue]
 
 
 class Point(BaseModel):
-    lat: float
-    lon: float
+    lat: Annotated[float, Field(ge=-90, le=90, allow_inf_nan=False)]
+    lon: Annotated[float, Field(ge=-180, le=180, allow_inf_nan=False)]
 
 
 class ScoreRequest(BaseModel):
     point: Point
-    weights: Optional[Dict[str, float]] = None
+    weights: Optional[Weights] = None
 
 
 class ConstraintResult(BaseModel):
@@ -35,8 +40,8 @@ class ScoreResponse(BaseModel):
 
 
 class BatchScoreRequest(BaseModel):
-    points: List[Point]
-    weights: Optional[Dict[str, float]] = None
+    points: Annotated[List[Point], Field(min_length=1, max_length=5000)]
+    weights: Optional[Weights] = None
 
 
 class BatchScoreResponse(BaseModel):

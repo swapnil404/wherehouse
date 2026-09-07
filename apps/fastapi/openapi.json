@@ -7,6 +7,8 @@
             "items": {
               "$ref": "#/components/schemas/Point"
             },
+            "maxItems": 5000,
+            "minItems": 1,
             "title": "Points",
             "type": "array"
           },
@@ -14,7 +16,18 @@
             "anyOf": [
               {
                 "additionalProperties": {
+                  "minimum": 0.0,
                   "type": "number"
+                },
+                "propertyNames": {
+                  "enum": [
+                    "demographics",
+                    "transport",
+                    "poi",
+                    "zoning",
+                    "flood",
+                    "aqi"
+                  ]
                 },
                 "type": "object"
               },
@@ -94,10 +107,14 @@
       "Point": {
         "properties": {
           "lat": {
+            "maximum": 90.0,
+            "minimum": -90.0,
             "title": "Lat",
             "type": "number"
           },
           "lon": {
+            "maximum": 180.0,
+            "minimum": -180.0,
             "title": "Lon",
             "type": "number"
           }
@@ -118,7 +135,18 @@
             "anyOf": [
               {
                 "additionalProperties": {
+                  "minimum": 0.0,
                   "type": "number"
+                },
+                "propertyNames": {
+                  "enum": [
+                    "demographics",
+                    "transport",
+                    "poi",
+                    "zoning",
+                    "flood",
+                    "aqi"
+                  ]
                 },
                 "type": "object"
               },

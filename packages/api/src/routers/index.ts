@@ -45,14 +45,14 @@ export const appRouter = router({
     };
   }),
   geo: router({
-    presets: publicProcedure.query(async () => {
+    presets: protectedProcedure.query(async () => {
       try {
         return await getPresets();
       } catch (error) {
         return mapGeoError(error);
       }
     }),
-    score: publicProcedure
+    score: protectedProcedure
       .input(z.object({
         point: pointSchema,
         weights: weightsSchema.nullish(),
@@ -64,7 +64,7 @@ export const appRouter = router({
           return mapGeoError(error);
         }
       }),
-    scoreBatch: publicProcedure
+    scoreBatch: protectedProcedure
       .input(z.object({
         points: z.array(pointSchema).min(1).max(5000),
         weights: weightsSchema.nullish(),
