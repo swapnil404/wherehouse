@@ -40,6 +40,14 @@ export const web = Cloudflare.Website.Vite("web", {
   },
 });
 
+export const geoKeepWarm = Cloudflare.Worker("geo-keep-warm", {
+  main: "./src/geo-keep-warm.ts",
+  crons: ["*/10 * * * *"],
+  env: {
+    GEO_SERVICE_URL: Config.string("GEO_SERVICE_URL"),
+  },
+});
+
 export type WebEnv = Cloudflare.InferEnv<typeof web>;
 
 export default Alchemy.Stack(
@@ -50,6 +58,7 @@ export default Alchemy.Stack(
   },
   Effect.gen(function* () {
     const webWorker = yield* web;
+    yield* geoKeepWarm;
 
     return {
       web: webWorker.url,

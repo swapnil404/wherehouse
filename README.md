@@ -145,6 +145,8 @@ Configure the FastAPI sidecar with `apps/fastapi` as its root directory.
 - Start command: `uvicorn main:app --host 0.0.0.0 --port $PORT`
 - Required environment variables: `GEO_SERVICE_TOKEN` and `ALLOWED_ORIGINS`
 
+The Cloudflare deployment also creates a `geo-keep-warm` scheduled Worker. Every 10 minutes, it requests `${GEO_SERVICE_URL}/health` so the Render sidecar stays warm for demos. The schedule is configured in `packages/infra/alchemy.run.ts`.
+
 ## Project Structure
 
 ```
