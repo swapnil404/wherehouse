@@ -18,6 +18,7 @@ export const database = Cloudflare.Hyperdrive.Connection("database", {
 });
 
 export const web = Cloudflare.Website.Vite("web", {
+  name: "app",
   rootDir: "../../apps/web",
   compatibility: {
     flags: ["nodejs_compat", "global_fetch_strictly_public"],
@@ -41,6 +42,7 @@ export const web = Cloudflare.Website.Vite("web", {
 });
 
 export const geoKeepWarm = Cloudflare.Worker("geo-keep-warm", {
+  name: "geo-keep-warm",
   main: "./src/geo-keep-warm.ts",
   crons: ["*/10 * * * *"],
   env: {
