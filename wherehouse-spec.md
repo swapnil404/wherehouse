@@ -381,7 +381,9 @@ Only after §12 is green, in priority order:
 2. **What-if optimizer** — given a polygon and preset, return top-N optimal points by refining to res 10.
 3. **Multi-site portfolio** — pick K sites maximizing coverage with minimal self-cannibalization.
 4. **Score-over-time** — how a site shifts under projected population growth.
-5. **LLM site memo** — a narrative paragraph from the structured breakdown. Cheap, demos well, strictly cosmetic; the structured explanation already exists and is what matters.
+5. **Pre-ingested city catalog** — extend the offline pipeline to additional supported metros and let users choose among cities whose datasets we have already downloaded, validated, normalized, and loaded. City selection must not trigger ingestion during a user request.
+6. **User-managed data ingestion** — later, allow users to create a city or study area from their own supported datasets. This requires asynchronous jobs, file validation, schema and CRS checks, provenance tracking, storage quotas, failure recovery, and isolation from the production Austin dataset; it is a separate platform feature, not part of the current build.
+7. **LLM site memo** — a narrative paragraph from the structured breakdown. Cheap, demos well, strictly cosmetic; the structured explanation already exists and is what matters.
 
 ---
 
