@@ -1,29 +1,42 @@
 import { ClientOnly } from "@tanstack/react-router";
 import { Suspense, lazy } from "react";
 
+import LayerPanel from "./layer-panel";
+
 /**
- * Client-only boundary for the map tree.
+ * Hybrid shell: the layer rail is docked on the left because its controls are
+ * always relevant, while the score panel floats over the map (inside
+ * `map-canvas`) since it has nothing to say until a cell is picked — docking it
+ * would reserve dead space.
  *
- * `lazy` keeps `maplibre-gl` out of the server bundle entirely — it reaches for
- * `window` at import time — and `ClientOnly` keeps the first client render in
- * sync with the SSR output. Every future map layer (deck.gl overlays, draw
- * tools) belongs behind this boundary too.
+ * `LayerPanel` sits outside the client-only boundary on purpose: it is plain
+ * React with no `window` access, so it renders during SSR and the rail is
+ * present on first paint.
+ *
+ * `lazy` keeps `maplibre-gl` and `deck.gl` out of the server bundle entirely —
+ * MapLibre reaches for `window` at import time — and `ClientOnly` keeps the
+ * first client render in sync with the SSR output. Every future map layer
+ * (draw tools, hot-spots) belongs behind this boundary too.
  */
 
 const MapCanvas = lazy(() => import("./map-canvas"));
 
 function MapFallback() {
-  return <div className="h-full w-full bg-neutral-950" />;
+  return <div className="h-full w-full bg-background" />;
 }
 
 export default function MapView() {
   return (
-    <div className="relative h-full w-full overflow-hidden">
-      <ClientOnly fallback={<MapFallback />}>
-        <Suspense fallback={<MapFallback />}>
-          <MapCanvas />
-        </Suspense>
-      </ClientOnly>
+    <div className="flex h-full w-full overflow-hidden">
+      <LayerPanel />
+
+      <div className="relative min-w-0 flex-1">
+        <ClientOnly fallback={<MapFallback />}>
+          <Suspense fallback={<MapFallback />}>
+            <MapCanvas />
+          </Suspense>
+        </ClientOnly>
+      </div>
     </div>
   );
 }
