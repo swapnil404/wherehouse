@@ -30,7 +30,7 @@ web-install:
 
 # Start the Cloudflare web application on port 3001.
 web-dev:
-    bun run dev
+    bun run dev:web
 
 # Create the FastAPI virtual environment and install its dependencies.
 geo-setup:
