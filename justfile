@@ -5,7 +5,7 @@ default:
     @just --list
 
 # Install both JavaScript and Python dependencies.
-setup: web-install geo-setup
+setup: web-install geo-setup ingest-setup
 
 # Start the web application and FastAPI sidecar together.
 dev:
@@ -47,3 +47,31 @@ geo-dev:
 geo-health:
     @curl --fail --silent --show-error http://localhost:8000/health
     @echo
+
+# Create the offline ingestion environment and install it.
+ingest-setup:
+    python -m venv pipeline/.venv
+    pipeline/.venv/bin/python -m pip install --upgrade pip
+    pipeline/.venv/bin/python -m pip install --editable pipeline
+    @if [ ! -f pipeline/.env ]; then cp pipeline/.env.example pipeline/.env; echo "Created pipeline/.env; add CENSUS_API_KEY. DATABASE_URL falls back to apps/web/.env."; else echo "Keeping existing pipeline/.env."; fi
+
+# Show the pinned ingestion sources without downloading or changing Neon.
+ingest-plan:
+    pipeline/.venv/bin/wherehouse-ingest plan
+
+# Download any source snapshots not already cached in pipeline/data/raw.
+ingest-download *ARGS:
+    pipeline/.venv/bin/wherehouse-ingest download {{ARGS}}
+
+# Build and validate H3 facts without changing Neon.
+ingest-build:
+    pipeline/.venv/bin/wherehouse-ingest build
+    pipeline/.venv/bin/wherehouse-ingest validate
+
+# Validate the built facts and atomically activate them in Neon.
+ingest-load:
+    pipeline/.venv/bin/wherehouse-ingest load
+
+# Run the complete manual refresh: download, build, validate, and promote.
+ingest *ARGS:
+    pipeline/.venv/bin/wherehouse-ingest run {{ARGS}}

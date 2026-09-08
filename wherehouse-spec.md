@@ -6,7 +6,7 @@ Problem Statement 7 — Geo Spatial Analytics & Site Detection
 | | |
 |---|---|
 | **Team** | Vaid — Frontend · Megha — ML / Spatial Analytics · Swapnil — Backend / Data |
-| **Metro area** | Austin, TX (Travis County) |
+| **Coverage area** | City of Austin municipal boundary |
 | **Version** | v3 · 2026-09-04 |
 | **Structure** | Phased by dependency, not by calendar |
 
@@ -107,11 +107,11 @@ The sidecar is a public URL, so the Worker authenticates every request with that
 
 | # | Assumption | Rationale |
 |---|---|---|
-| A1 | **Austin, TX** — all layers clipped to this bbox | Census/TIGER, FEMA and EPA are US-only; Austin has all of them plus clean OSM and open city zoning. Swapping metros is a config change |
-| A2 | **Data ingested offline and static** — no source APIs at request time | Live fetches during a demo are how demos die |
+| A1 | **City of Austin municipal boundary** — all layers clipped to one polygon | This keeps zoning and every other feature consistently available. Travis County expansion requires an explicit unknown-zoning policy |
+| A2 | **Data ingested offline and static** — a repeatable pipeline is started manually; no source APIs are called at request time | Live fetches during a demo are how demos die |
 | A3 | **Three presets, equally tuned** — Retail, Warehouse, EV Charging | Configurability is an explicit evaluation criterion; three presets prove it in one gesture |
 | A4 | **Validation = 30 sites labeled by all three of us** against a written rubric, plus ~10 known-good real locations and ~10 deliberately bad points | The brief says "expert-labeled". We aren't domain experts, so we use a documented rubric and report inter-rater agreement rather than overclaiming |
-| A5 | **H3 resolution 8** (~0.74 km²/cell). Austin ≈ 3,500 cells | Small enough to fully precompute, fine enough to be useful |
+| A5 | **H3 resolution 8** (~0.74 km²/cell). Austin city ≈ 1,200 cells | Small enough to fully precompute, fine enough to be useful |
 
 ### 4.2 Out of scope
 
@@ -198,7 +198,7 @@ Owned by Megha. Five endpoints, all under `/v1` with bearer auth:
 
 Exact request/response shapes are defined by the sidecar's OpenAPI schema (§3.1) and generated into the TypeScript client — they are deliberately not duplicated here, because a spec that restates a contract becomes the second place it can be wrong.
 
-Errors return `{error: {code, message, detail}}` with typed codes; an out-of-bounds coordinate returns `POINT_OUT_OF_BOUNDS` carrying the supported bbox, so the UI can say "outside the Austin metro coverage area" instead of showing a stack trace. tRPC maps these onto typed tRPC errors.
+Errors return `{error: {code, message, detail}}` with typed codes; an out-of-bounds coordinate returns `POINT_OUT_OF_BOUNDS` carrying the supported bbox, so the UI can say "outside the Austin coverage area" instead of showing a stack trace. tRPC maps these onto typed tRPC errors.
 
 ---
 

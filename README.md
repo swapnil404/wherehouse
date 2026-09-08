@@ -93,6 +93,49 @@ bun run gen:geo
 
 This command exports `apps/fastapi/openapi.json`. It then updates the generated TypeScript types in `packages/api/src/geo`.
 
+## Offline Data Ingestion
+
+The repeatable ingestion pipeline lives in `pipeline/`. It downloads official source snapshots,
+clips every layer to the City of Austin boundary, builds raw facts for H3 resolution 8 cells,
+validates the result, and then loads it into Neon. It does not calculate final scores or hotspots.
+
+Set up the pipeline once:
+
+```bash
+just ingest-setup
+```
+
+Add `CENSUS_API_KEY` to `pipeline/.env`. The pipeline reuses `DATABASE_URL` from `apps/web/.env` by
+default; set it in `pipeline/.env` only when ingestion should target a different Neon database.
+Inspect the planned sources without downloading anything:
+
+```bash
+just ingest-plan
+```
+
+Run the complete manual refresh:
+
+```bash
+just ingest
+```
+
+Downloaded files and generated outputs stay under the ignored `pipeline/data/` directory. Each run
+writes a source manifest containing URLs, vintages, timestamps, sizes, and SHA-256 checksums. Use
+`just ingest --refresh` when you intentionally want to replace cached source snapshots.
+
+For safer debugging, run the stages separately:
+
+```bash
+just ingest-download
+just ingest-build
+just ingest-load
+```
+
+`ingest-load` refuses to change Neon if local validation fails. In Neon, a new dataset remains
+inactive while its rows and provenance are inserted. The `geo_active_dataset` pointer changes in the
+same transaction only after the complete dataset is present, so the application cannot observe a
+partially loaded refresh.
+
 ## UI Customization
 
 React web apps in this stack share shadcn/ui primitives through `packages/ui`.
@@ -159,6 +202,7 @@ wherehouse/
 │   ├── api/         # API layer / business logic
 │   ├── auth/        # Authentication configuration & logic
 │   └── db/          # Database schema & queries
+└── pipeline/        # Manual, repeatable offline data ingestion
 ```
 
 ## Available Scripts
