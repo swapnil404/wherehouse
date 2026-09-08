@@ -3,9 +3,12 @@ import { env } from "@wherehouse/env/server";
 import type { components, operations } from "./openapi.generated";
 
 type PresetsOperation = operations["get_presets_v1_presets_get"];
+type HeatmapOperation = operations["get_heatmap_v1_heatmap_get"];
 
 export type GeoPresets =
   PresetsOperation["responses"][200]["content"]["application/json"];
+export type HeatmapResponse =
+  HeatmapOperation["responses"][200]["content"]["application/json"];
 export type ScoreRequest = components["schemas"]["ScoreRequest"];
 export type ScoreResponse = components["schemas"]["ScoreResponse"];
 export type BatchScoreRequest = components["schemas"]["BatchScoreRequest"];
@@ -65,6 +68,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export function getPresets(): Promise<GeoPresets> {
   return request<GeoPresets>("/v1/presets");
+}
+
+export function getHeatmap(preset: "warehouse" | "retail"): Promise<HeatmapResponse> {
+  const query = new URLSearchParams({ preset });
+  return request<HeatmapResponse>(`/v1/heatmap?${query}`);
 }
 
 export function scorePoint(input: ScoreRequest): Promise<ScoreResponse> {

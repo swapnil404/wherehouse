@@ -12,6 +12,15 @@
             "title": "Points",
             "type": "array"
           },
+          "preset": {
+            "default": "warehouse",
+            "enum": [
+              "warehouse",
+              "retail"
+            ],
+            "title": "Preset",
+            "type": "string"
+          },
           "weights": {
             "anyOf": [
               {
@@ -107,20 +116,21 @@
       "HeatmapCell": {
         "description": "One heatmap cell: identity + weight-independent subscores only.\n\nNo composite score, no geometry \u2014 the frontend derives boundaries\nwith h3-js and recomputes the weighted composite locally.",
         "properties": {
+          "eligible": {
+            "title": "Eligible",
+            "type": "boolean"
+          },
           "h3Index": {
             "title": "H3Index",
             "type": "string"
           },
           "subscores": {
-            "additionalProperties": {
-              "type": "number"
-            },
-            "title": "Subscores",
-            "type": "object"
+            "$ref": "#/components/schemas/Subscores"
           }
         },
         "required": [
           "h3Index",
+          "eligible",
           "subscores"
         ],
         "title": "HeatmapCell",
@@ -142,11 +152,20 @@
           "h3Resolution": {
             "title": "H3Resolution",
             "type": "integer"
+          },
+          "preset": {
+            "enum": [
+              "warehouse",
+              "retail"
+            ],
+            "title": "Preset",
+            "type": "string"
           }
         },
         "required": [
           "datasetId",
           "h3Resolution",
+          "preset",
           "cells"
         ],
         "title": "HeatmapResponse",
@@ -178,6 +197,15 @@
         "properties": {
           "point": {
             "$ref": "#/components/schemas/Point"
+          },
+          "preset": {
+            "default": "warehouse",
+            "enum": [
+              "warehouse",
+              "retail"
+            ],
+            "title": "Preset",
+            "type": "string"
           },
           "weights": {
             "anyOf": [
@@ -241,11 +269,7 @@
             "type": "number"
           },
           "subscores": {
-            "additionalProperties": {
-              "type": "number"
-            },
-            "title": "Subscores",
-            "type": "object"
+            "$ref": "#/components/schemas/Subscores"
           }
         },
         "required": [
@@ -258,6 +282,44 @@
           "constraints"
         ],
         "title": "ScoreResponse",
+        "type": "object"
+      },
+      "Subscores": {
+        "properties": {
+          "aqi": {
+            "title": "Aqi",
+            "type": "number"
+          },
+          "demographics": {
+            "title": "Demographics",
+            "type": "number"
+          },
+          "flood": {
+            "title": "Flood",
+            "type": "number"
+          },
+          "poi": {
+            "title": "Poi",
+            "type": "number"
+          },
+          "transport": {
+            "title": "Transport",
+            "type": "number"
+          },
+          "zoning": {
+            "title": "Zoning",
+            "type": "number"
+          }
+        },
+        "required": [
+          "demographics",
+          "transport",
+          "poi",
+          "zoning",
+          "flood",
+          "aqi"
+        ],
+        "title": "Subscores",
         "type": "object"
       },
       "ValidationError": {
@@ -333,6 +395,22 @@
     "/v1/heatmap": {
       "get": {
         "operationId": "get_heatmap_v1_heatmap_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "preset",
+            "required": false,
+            "schema": {
+              "default": "warehouse",
+              "enum": [
+                "warehouse",
+                "retail"
+              ],
+              "title": "Preset",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -343,6 +421,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [

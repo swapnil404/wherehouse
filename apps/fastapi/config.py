@@ -21,5 +21,4 @@ ALLOWED_ORIGINS = [
     o.strip() for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.strip()
 ]
 
-# Dataset identifier returned by /v1/heatmap (fact table name).
-DATASET_ID = os.getenv("DATASET_ID", "h3_cell_fact")
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()

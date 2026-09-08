@@ -7,8 +7,8 @@ from fastapi import FastAPI, HTTPException, Depends, Security
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
 
-from config import ALLOWED_ORIGINS, DATASET_ID, GEO_SERVICE_TOKEN
-from data import get_cell_index, get_df, get_h3_resolution, load_data
+from config import ALLOWED_ORIGINS, GEO_SERVICE_TOKEN
+from data import get_dataset_id, get_df, get_h3_resolution, load_data
 from schemas import (
     BatchScoreRequest,
     BatchScoreResponse,
@@ -16,6 +16,7 @@ from schemas import (
     HeatmapCell,
     HeatmapResponse,
     Point,
+    PresetName,
     ScoreRequest,
     ScoreResponse,
 )
@@ -23,7 +24,8 @@ from scoring import (
     compute_subscores,
     evaluate_constraints,
     composite_score,
-    DEFAULT_WEIGHTS,
+    PRESET_WEIGHTS,
+    prepare_scoring_data,
 )
 
 MAX_BATCH_POINTS = 5000
@@ -31,13 +33,19 @@ MAX_BATCH_POINTS = 5000
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    load_data()                # load CSV once
-    app.state.df = get_df()
+    load_data()
+    app.state.df = prepare_scoring_data(get_df())
+    app.state.dataset_id = get_dataset_id()
     app.state.h3_res = get_h3_resolution()
-    app.state.cell_index = get_cell_index()  # exact h3_index -> row
+    app.state.cell_index = {
+        str(cell): position for position, cell in enumerate(app.state.df["h3_index"])
+    }
     print(f"Loaded {len(app.state.df):,} cells at H3 res {app.state.h3_res}")
-    app.state.heatmap_cells = _build_heatmap_cells(app.state.df)
-    print(f"Precomputed subscores for {len(app.state.heatmap_cells):,} cells")
+    app.state.heatmap_cells = {
+        preset: _build_heatmap_cells(app.state.df, preset)
+        for preset in PRESET_WEIGHTS
+    }
+    print(f"Precomputed heatmaps for {', '.join(app.state.heatmap_cells)}")
     yield
 
 
@@ -92,22 +100,30 @@ def _lookup_row(point: Point):
 
 
 # ---------- core logic ----------
-def _build_heatmap_cells(df) -> list:
+def _build_heatmap_cells(df, preset: PresetName) -> list[HeatmapCell]:
     """Precompute weight-independent subscores for every cell."""
     return [
-        HeatmapCell(h3_index=row["h3_index"], subscores=compute_subscores(row))
+        HeatmapCell(
+            h3_index=str(row["h3_index"]),
+            eligible=all(result["pass"] for result in evaluate_constraints(row, preset)),
+            subscores=compute_subscores(row, preset),
+        )
         for _, row in df.iterrows()
     ]
 
 
-def _score_single(point: Point, weights: Optional[Dict[str, float]]) -> ScoreResponse:
+def _score_single(
+    point: Point,
+    preset: PresetName,
+    weights: Optional[Dict[str, float]],
+) -> ScoreResponse:
     row = _lookup_row(point)
 
-    subs = compute_subscores(row)
-    w = weights or DEFAULT_WEIGHTS
+    subs = compute_subscores(row, preset)
+    w = weights or PRESET_WEIGHTS[preset]
     score = composite_score(subs, w)
 
-    constraints = evaluate_constraints(row)
+    constraints = evaluate_constraints(row, preset)
     eligible = all(c["pass"] for c in constraints)
 
     return ScoreResponse(
@@ -137,21 +153,25 @@ def health():
 
 @app.get("/v1/presets", response_model=Dict[str, Dict[str, float]])
 def get_presets(_: str = Depends(verify_token)) -> Dict[str, Dict[str, float]]:
-    return {"warehouse": DEFAULT_WEIGHTS}
+    return PRESET_WEIGHTS
 
 
 @app.get("/v1/heatmap", response_model=HeatmapResponse)
-def get_heatmap(_: str = Depends(verify_token)):
+def get_heatmap(
+    preset: PresetName = "warehouse",
+    _: str = Depends(verify_token),
+) -> HeatmapResponse:
     return HeatmapResponse(
-        dataset_id=DATASET_ID,
+        dataset_id=app.state.dataset_id,
         h3_resolution=app.state.h3_res,
-        cells=app.state.heatmap_cells,
+        preset=preset,
+        cells=app.state.heatmap_cells[preset],
     )
 
 
 @app.post("/v1/score", response_model=ScoreResponse)
 def score_point(req: ScoreRequest, _: str = Depends(verify_token)):
-    return _score_single(req.point, req.weights)
+    return _score_single(req.point, req.preset, req.weights)
 
 
 @app.post("/v1/score/batch", response_model=BatchScoreResponse)
@@ -163,9 +183,12 @@ def score_batch(req: BatchScoreRequest, _: str = Depends(verify_token)):
             status_code=413,
             detail={
                 "code": "BATCH_LIMIT_EXCEEDED",
-                "message": f"Batch limited to {MAX_BATCH_POINTS} points per request (got {len(req.points)}).",
+                "message": (
+                    f"Batch limited to {MAX_BATCH_POINTS} points per request "
+                    f"(got {len(req.points)})."
+                ),
             },
         )
     return BatchScoreResponse(
-        results=[_score_single(p, req.weights) for p in req.points]
+        results=[_score_single(p, req.preset, req.weights) for p in req.points]
     )

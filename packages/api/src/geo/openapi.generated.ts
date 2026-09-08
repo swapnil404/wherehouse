@@ -21,6 +21,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/heatmap": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Heatmap */
+        get: operations["get_heatmap_v1_heatmap_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/presets": {
         parameters: {
             query?: never;
@@ -80,6 +97,12 @@ export interface components {
         BatchScoreRequest: {
             /** Points */
             points: components["schemas"]["Point"][];
+            /**
+             * Preset
+             * @default warehouse
+             * @enum {string}
+             */
+            preset: "warehouse" | "retail";
             /** Weights */
             weights?: {
                 [key: string]: number;
@@ -111,6 +134,34 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /**
+         * HeatmapCell
+         * @description One heatmap cell: identity + weight-independent subscores only.
+         *
+         *     No composite score, no geometry — the frontend derives boundaries
+         *     with h3-js and recomputes the weighted composite locally.
+         */
+        HeatmapCell: {
+            /** Eligible */
+            eligible: boolean;
+            /** H3Index */
+            h3Index: string;
+            subscores: components["schemas"]["Subscores"];
+        };
+        /** HeatmapResponse */
+        HeatmapResponse: {
+            /** Cells */
+            cells: components["schemas"]["HeatmapCell"][];
+            /** Datasetid */
+            datasetId: string;
+            /** H3Resolution */
+            h3Resolution: number;
+            /**
+             * Preset
+             * @enum {string}
+             */
+            preset: "warehouse" | "retail";
+        };
         /** Point */
         Point: {
             /** Lat */
@@ -121,6 +172,12 @@ export interface components {
         /** ScoreRequest */
         ScoreRequest: {
             point: components["schemas"]["Point"];
+            /**
+             * Preset
+             * @default warehouse
+             * @enum {string}
+             */
+            preset: "warehouse" | "retail";
             /** Weights */
             weights?: {
                 [key: string]: number;
@@ -140,10 +197,22 @@ export interface components {
             lon: number;
             /** Score */
             score: number;
-            /** Subscores */
-            subscores: {
-                [key: string]: number;
-            };
+            subscores: components["schemas"]["Subscores"];
+        };
+        /** Subscores */
+        Subscores: {
+            /** Aqi */
+            aqi: number;
+            /** Demographics */
+            demographics: number;
+            /** Flood */
+            flood: number;
+            /** Poi */
+            poi: number;
+            /** Transport */
+            transport: number;
+            /** Zoning */
+            zoning: number;
         };
         /** ValidationError */
         ValidationError: {
@@ -183,6 +252,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    get_heatmap_v1_heatmap_get: {
+        parameters: {
+            query?: {
+                preset?: "warehouse" | "retail";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HeatmapResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
