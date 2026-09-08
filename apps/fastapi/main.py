@@ -7,12 +7,25 @@ from fastapi import FastAPI, HTTPException, Depends, Security
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
 
-from config import ALLOWED_ORIGINS, GEO_SERVICE_TOKEN
+from config import ALLOWED_ORIGINS, DATASET_ID, GEO_SERVICE_TOKEN
 from data import get_cell_index, get_df, get_h3_resolution, load_data
+from hotspots import (
+    cell_composites,
+    classify_bin,
+    classify_gi,
+    dbscan_on_candidates,
+    find_underserved,
+    gi_star_scores,
+)
 from schemas import (
     BatchScoreRequest,
     BatchScoreResponse,
     ConstraintResult,
+    HotspotCell,
+    HotspotResponse,
+    HotspotStatCell,
+    HotspotsRequest,
+    HotspotsResponse,
     Point,
     ScoreRequest,
     ScoreResponse,
@@ -27,6 +40,21 @@ from scoring import (
 MAX_BATCH_POINTS = 5000
 
 
+def _build_hotspot_cells(df) -> list:
+    """Precompute subscores + eligibility for every cell (heatmap dump)."""
+    cells = []
+    for _, row in df.iterrows():
+        constraints = evaluate_constraints(row)
+        cells.append(
+            HotspotCell(
+                h3_index=row["h3_index"],
+                eligible=all(c["pass"] for c in constraints),
+                subscores=compute_subscores(row),
+            )
+        )
+    return cells
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     load_data()                # load CSV once
@@ -34,6 +62,8 @@ async def lifespan(app: FastAPI):
     app.state.h3_res = get_h3_resolution()
     app.state.cell_index = get_cell_index()  # exact h3_index -> row
     print(f"Loaded {len(app.state.df):,} cells at H3 res {app.state.h3_res}")
+    app.state.hotspot_cells = _build_hotspot_cells(app.state.df)
+    print(f"Precomputed subscores for {len(app.state.hotspot_cells):,} cells")
     yield
 
 
@@ -126,6 +156,79 @@ def health():
 @app.get("/v1/presets")
 def get_presets(_: str = Depends(verify_token)):
     return {"warehouse": DEFAULT_WEIGHTS}
+
+
+@app.get("/v1/hotspot", response_model=HotspotResponse)
+def get_hotspot(_: str = Depends(verify_token)):
+    return HotspotResponse(
+        dataset_id=DATASET_ID,
+        h3_resolution=app.state.h3_res,
+        cells=app.state.hotspot_cells,
+    )
+
+
+@app.post("/v1/hotspots", response_model=HotspotsResponse)
+def compute_hotspots(req: HotspotsRequest, _: str = Depends(verify_token)):
+    cached = [
+        {"h3_index": c.h3_index, "subscores": c.subscores}
+        for c in app.state.hotspot_cells
+    ]
+    h3_list = [c["h3_index"] for c in cached]
+    weights = req.weights or DEFAULT_WEIGHTS
+    scores = cell_composites(cached, weights)
+
+    cells: list = []
+    clusters: list = []
+    if req.method == "gi_star":
+        z = gi_star_scores(h3_list, scores, k=req.k)
+        cells = [
+            HotspotStatCell(
+                h3_index=h,
+                score=round(float(s), 2),
+                stat=round(float(zi), 3),
+                class_=classify_gi(float(zi)),
+            )
+            for h, s, zi in zip(h3_list, scores, z)
+        ]
+    elif req.method == "binning":
+        import numpy as np
+
+        q1, q2, q3 = (round(float(v), 2) for v in np.percentile(scores, [25, 50, 75]))
+        cells = [
+            HotspotStatCell(
+                h3_index=h,
+                score=round(float(s), 2),
+                stat=round(float(s), 2),
+                class_=classify_bin(float(s), q1, q2, q3),
+            )
+            for h, s in zip(h3_list, scores)
+        ]
+    else:  # dbscan
+        labels, clusters = dbscan_on_candidates(
+            h3_list,
+            scores,
+            threshold=req.threshold,
+            eps_km=req.eps_km,
+            min_samples=req.min_samples,
+        )
+        cells = [
+            HotspotStatCell(
+                h3_index=h,
+                score=round(float(s), 2),
+                stat=float(lab),
+                class_="noise" if lab == -1 else "cluster",
+            )
+            for h, s, lab in zip(h3_list, scores, labels)
+        ]
+
+    return HotspotsResponse(
+        dataset_id=DATASET_ID,
+        h3_resolution=app.state.h3_res,
+        method=req.method,
+        cells=cells,
+        clusters=clusters,
+        underserved=find_underserved(cached),
+    )
 
 
 @app.post("/v1/score", response_model=ScoreResponse)
