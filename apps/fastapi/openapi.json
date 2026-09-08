@@ -104,6 +104,54 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "HeatmapCell": {
+        "description": "One heatmap cell: identity + weight-independent subscores only.\n\nNo composite score, no geometry \u2014 the frontend derives boundaries\nwith h3-js and recomputes the weighted composite locally.",
+        "properties": {
+          "h3Index": {
+            "title": "H3Index",
+            "type": "string"
+          },
+          "subscores": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Subscores",
+            "type": "object"
+          }
+        },
+        "required": [
+          "h3Index",
+          "subscores"
+        ],
+        "title": "HeatmapCell",
+        "type": "object"
+      },
+      "HeatmapResponse": {
+        "properties": {
+          "cells": {
+            "items": {
+              "$ref": "#/components/schemas/HeatmapCell"
+            },
+            "title": "Cells",
+            "type": "array"
+          },
+          "datasetId": {
+            "title": "Datasetid",
+            "type": "string"
+          },
+          "h3Resolution": {
+            "title": "H3Resolution",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "datasetId",
+          "h3Resolution",
+          "cells"
+        ],
+        "title": "HeatmapResponse",
+        "type": "object"
+      },
       "Point": {
         "properties": {
           "lat": {
@@ -280,6 +328,29 @@
           }
         },
         "summary": "Health"
+      }
+    },
+    "/v1/heatmap": {
+      "get": {
+        "operationId": "get_heatmap_v1_heatmap_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HeatmapResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Heatmap"
       }
     },
     "/v1/presets": {

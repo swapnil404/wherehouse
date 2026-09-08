@@ -46,3 +46,24 @@ class BatchScoreRequest(BaseModel):
 
 class BatchScoreResponse(BaseModel):
     results: List[ScoreResponse]
+
+
+class HeatmapCell(BaseModel):
+    """One heatmap cell: identity + weight-independent subscores only.
+
+    No composite score, no geometry — the frontend derives boundaries
+    with h3-js and recomputes the weighted composite locally.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    h3_index: str = Field(alias="h3Index")
+    subscores: Dict[str, float]
+
+
+class HeatmapResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    dataset_id: str = Field(alias="datasetId")
+    h3_resolution: int = Field(alias="h3Resolution")
+    cells: List[HeatmapCell]

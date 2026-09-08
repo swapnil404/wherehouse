@@ -7,12 +7,14 @@ from fastapi import FastAPI, HTTPException, Depends, Security
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
 
-from config import ALLOWED_ORIGINS, GEO_SERVICE_TOKEN
+from config import ALLOWED_ORIGINS, DATASET_ID, GEO_SERVICE_TOKEN
 from data import get_cell_index, get_df, get_h3_resolution, load_data
 from schemas import (
     BatchScoreRequest,
     BatchScoreResponse,
     ConstraintResult,
+    HeatmapCell,
+    HeatmapResponse,
     Point,
     ScoreRequest,
     ScoreResponse,
@@ -34,6 +36,8 @@ async def lifespan(app: FastAPI):
     app.state.h3_res = get_h3_resolution()
     app.state.cell_index = get_cell_index()  # exact h3_index -> row
     print(f"Loaded {len(app.state.df):,} cells at H3 res {app.state.h3_res}")
+    app.state.heatmap_cells = _build_heatmap_cells(app.state.df)
+    print(f"Precomputed subscores for {len(app.state.heatmap_cells):,} cells")
     yield
 
 
@@ -88,6 +92,14 @@ def _lookup_row(point: Point):
 
 
 # ---------- core logic ----------
+def _build_heatmap_cells(df) -> list:
+    """Precompute weight-independent subscores for every cell."""
+    return [
+        HeatmapCell(h3_index=row["h3_index"], subscores=compute_subscores(row))
+        for _, row in df.iterrows()
+    ]
+
+
 def _score_single(point: Point, weights: Optional[Dict[str, float]]) -> ScoreResponse:
     row = _lookup_row(point)
 
@@ -126,6 +138,15 @@ def health():
 @app.get("/v1/presets", response_model=Dict[str, Dict[str, float]])
 def get_presets(_: str = Depends(verify_token)) -> Dict[str, Dict[str, float]]:
     return {"warehouse": DEFAULT_WEIGHTS}
+
+
+@app.get("/v1/heatmap", response_model=HeatmapResponse)
+def get_heatmap(_: str = Depends(verify_token)):
+    return HeatmapResponse(
+        dataset_id=DATASET_ID,
+        h3_resolution=app.state.h3_res,
+        cells=app.state.heatmap_cells,
+    )
 
 
 @app.post("/v1/score", response_model=ScoreResponse)
