@@ -1,11 +1,7 @@
-import { createFileRoute } from "@tanstack/react-router";
-
-import MapView from "@/components/map-view";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
 export const Route = createFileRoute("/")({
-  component: HomeComponent,
+  beforeLoad: () => {
+    throw redirect({ to: "/dashboard" });
+  },
 });
-
-function HomeComponent() {
-  return <MapView />;
-}

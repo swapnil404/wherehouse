@@ -153,8 +153,8 @@ def health():
     return {"status": "ok"}
 
 
-@app.get("/v1/presets")
-def get_presets(_: str = Depends(verify_token)):
+@app.get("/v1/presets", response_model=Dict[str, Dict[str, float]])
+def get_presets(_: str = Depends(verify_token)) -> Dict[str, Dict[str, float]]:
     return {"warehouse": DEFAULT_WEIGHTS}
 
 

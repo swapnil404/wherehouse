@@ -20,15 +20,15 @@ def compute_subscores(row) -> Dict[str, float]:
     demo = 100 * (0.60 * row["target_income_fit"] + 0.40 * row["target_age_fit"])
     
     trans = 100 * (
-        0.42 * min(row["road_density"] / 8.0, 1.0) + 
-        0.65 * row["highway_access_score"]
-    )
+        0.42 * min(row["road_density"] / 8.0, 1.0)
+        + 0.65 * row["highway_access_score"]
+    ) / (0.42 + 0.65)
     
     poi = 100 * (
         0.50 * row["competition_score"]
         + 0.30 * row["complementary_score"]
         + 0.40 * row["anchor_score"]
-    )
+    ) / (0.50 + 0.30 + 0.40)
     
     zone_map = {
         "industrial": 95,

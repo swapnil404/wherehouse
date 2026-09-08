@@ -9,7 +9,10 @@
       "default": "./src/*.ts"
     }
   },
-  "scripts": {},
+  "scripts": {
+    "check-types": "tsc --noEmit",
+    "gen:geo": "openapi-typescript ../../apps/fastapi/openapi.json -o src/geo/openapi.generated.ts"
+  },
   "dependencies": {
     "@trpc/client": "catalog:",
     "@trpc/server": "catalog:",
@@ -21,6 +24,7 @@
   },
   "devDependencies": {
     "@wherehouse/config": "workspace:*",
+    "openapi-typescript": "^7.13.0",
     "typescript": "catalog:"
   }
 }

@@ -63,3 +63,6 @@ coverage
 .cache
 tmp
 temp
+
+# Offline ingestion artifacts (downloaded sources and generated outputs)
+pipeline/data/

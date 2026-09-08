@@ -18,9 +18,10 @@ export const database = Cloudflare.Hyperdrive.Connection("database", {
 });
 
 export const web = Cloudflare.Website.Vite("web", {
+  name: "app",
   rootDir: "../../apps/web",
   compatibility: {
-    flags: ["nodejs_compat"],
+    flags: ["nodejs_compat", "global_fetch_strictly_public"],
   },
   env: {
     HYPERDRIVE: database,
@@ -32,9 +33,20 @@ export const web = Cloudflare.Website.Vite("web", {
     GOOGLE_CLIENT_SECRET: Config.redacted("GOOGLE_CLIENT_SECRET").pipe(
       Config.withDefault(Redacted.make("")),
     ),
+    GEO_SERVICE_URL: Config.string("GEO_SERVICE_URL"),
+    GEO_SERVICE_TOKEN: Config.redacted("GEO_SERVICE_TOKEN"),
   },
   dev: {
     port: 3001,
+  },
+});
+
+export const geoKeepWarm = Cloudflare.Worker("geo-keep-warm", {
+  name: "geo-keep-warm",
+  main: "./src/geo-keep-warm.ts",
+  crons: ["*/10 * * * *"],
+  env: {
+    GEO_SERVICE_URL: Config.string("GEO_SERVICE_URL"),
   },
 });
 
@@ -48,6 +60,7 @@ export default Alchemy.Stack(
   },
   Effect.gen(function* () {
     const webWorker = yield* web;
+    yield* geoKeepWarm;
 
     return {
       web: webWorker.url,
