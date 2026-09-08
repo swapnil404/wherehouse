@@ -5,7 +5,7 @@ Problem Statement 7 — Geo Spatial Analytics & Site Detection
 
 | | |
 |---|---|
-| **Team** | Vaid — Frontend · Megha — ML / Spatial Analytics · Swapnil — Backend / Data |
+| **Team** | Vaidehi — Frontend / Product Design · Megha — Geo / Spatial Analytics · Swapnil — Backend / Data |
 | **Coverage area** | City of Austin municipal boundary |
 | **Version** | v3 · 2026-09-04 |
 | **Structure** | Phased by dependency, not by calendar |
@@ -45,7 +45,7 @@ bun create better-t-stack@latest wherehouse --frontend tanstack-start --backend 
 
 ### 2.1 The one thing the stack doesn't cover
 
-The brief mandates *Python (GeoPandas, Shapely, H3, scikit-learn)* and *FastAPI*. Better-T-Stack is entirely TypeScript. We resolve this with a **Python FastAPI sidecar** (`apps/geo`) owning every operation that needs the Python geospatial toolchain. The TypeScript app owns UI, auth, saved user data, and fast read-through of precomputed results.
+The brief mandates *Python (GeoPandas, Shapely, H3, scikit-learn)* and *FastAPI*. Better-T-Stack is entirely TypeScript. We resolve this with a **Python FastAPI sidecar** (`apps/fastapi`) owning every operation that needs the Python geospatial toolchain. The TypeScript app owns UI, auth, saved user data, and the typed proxy to the sidecar.
 
 Both halves talk to the same Neon database. The split is by *capability*:
 
@@ -59,7 +59,7 @@ This is a real distributed system, so §3.1–3.2 are about making the seam not 
 ## 3. Architecture
 
 ```
-BROWSER — TanStack Start + MapLibre + deck.gl                    (Vaid)
+BROWSER — TanStack Start + MapLibre + deck.gl                (Vaidehi)
   map canvas · score panel · weight editor · compare tray
       │ tRPC                                    └── PMTiles ────┐
       ▼                                                        │
@@ -68,8 +68,8 @@ CLOUDFLARE WORKERS — TanStack Start server                (Swapnil)
       │ Hyperdrive                    │ HTTPS + bearer          │
       ▼                               ▼                        │
 NEON POSTGRES + POSTGIS  ◄────  RENDER — FastAPI          (Megha)
-  h3_cells · cell_reach          /score /hotspots /catchment
-  layer tables · auth · app      GeoPandas · H3 · sklearn       │
+  geo_dataset · h3_cell_fact     /heatmap /score /batch
+  auth · app · later: reach      later: hotspots / catchment    │
                                                                │
 CLOUDFLARE R2 — *.pmtiles (roads, zoning, flood, buildings) ────┘
 
@@ -79,23 +79,23 @@ OFFLINE, NEVER DEPLOYED                                   (Swapnil)
 
 ### 3.1 Contract between TypeScript and Python
 
-**The sidecar's OpenAPI schema is the single source of truth.** `bun run gen:geo` generates a typed client from it; tRPC procedures wrap that client and never re-declare response shapes. A change by Megha breaks Swapnil's typecheck immediately rather than at runtime in the demo. Keep `gen:geo` in CI.
+**The sidecar's OpenAPI schema is the single source of truth.** `bun run gen:geo` generates a typed client from it; tRPC procedures wrap that client and do not manually duplicate its response shapes. After a FastAPI route or schema changes, regenerate and commit both `apps/fastapi/openapi.json` and the generated TypeScript definitions.
 
-Until the sidecar is real it serves fixtures for every endpoint, so nobody is ever blocked on anybody.
+The sidecar and ingestion data are real. Frontend work should target the agreed contract and connect to the real endpoint as soon as its matching backend PR lands; visual layout work does not need to wait for that merge.
 
 ### 3.2 Render cold starts — the main operational risk
 
 Render's free tier spins down after ~15 minutes idle, cold-starting in ~50 seconds. That would destroy a live demo. Three mitigations, in order of importance:
 
-1. **Architectural — the sidecar is not on the critical path for first paint.** The opening view (heatmap, hot-spots, layer overlays, isochrones) reads entirely from precomputed Postgres tables and R2 tiles. A completely cold sidecar still gives a fully rendered, explorable map. Only *ad-hoc* work — scoring an arbitrary point, batch-scoring a custom polygon, re-clustering — touches Python. **Guard this property as you build; it's easy to accidentally route something onto the critical path.**
+1. **Current Austin path — compact and cached.** The initial H3 heatmap is temporarily served by FastAPI so the scoring formulas remain in one language. FastAPI prepares one compact payload containing H3 indexes, eligibility, and six subscores for the 1,021 active cells; it omits geometry and detailed constraints and caches the prepared payload. Cloudflare may cache the user-independent result. If dataset size or cold starts become a problem, materialize the same contract into Neon or R2 without changing the UI.
 2. **Warmup on app load** — the root route fires a non-blocking `/health`. A request landing mid-spin-up shows a "warming up analysis engine" toast rather than looking broken.
 3. **Cloudflare Cron Trigger** pings `/health` every 10 minutes.
 
-Render's free tier also caps at **512 MB RAM**. The sidecar must query PostGIS for the rows it needs, never load metro-wide GeoDataFrames. *Any `read_postgis` without a `WHERE` clause is a bug* — make it a review rule.
+Render's free tier also caps at **512 MB RAM**. Caching the compact 1,021-row Austin heatmap is acceptable; loading raw metro-wide geometry or source GeoDataFrames is not. Point scoring queries the exact containing H3 cell, and batch operations must select only the requested cells.
 
 ### 3.3 Configuration
 
-The Workers app needs `DATABASE_URL` (Neon direct, for drizzle-kit migrations), `HYPERDRIVE_ID` (the runtime DB path), `BETTER_AUTH_SECRET` / `BETTER_AUTH_URL`, `GEO_SERVICE_URL`, `GEO_SERVICE_TOKEN`, and `R2_PUBLIC_URL`. The sidecar needs a pooled `DATABASE_URL`, the same `GEO_SERVICE_TOKEN`, and `ALLOWED_ORIGINS`.
+The deployment needs `DATABASE_URL`, `BETTER_AUTH_SECRET`, Google OAuth credentials, `GEO_SERVICE_URL`, and `GEO_SERVICE_TOKEN`; Alchemy creates and binds Hyperdrive and sets the deployed `BETTER_AUTH_URL`. The sidecar needs the same Neon `DATABASE_URL`, the same `GEO_SERVICE_TOKEN`, and an `ALLOWED_ORIGINS` list containing the production Worker URL. `R2_PUBLIC_URL` is added when PMTiles are deployed.
 
 The sidecar is a public URL, so the Worker authenticates every request with that shared bearer token — it is not a public API.
 
@@ -111,7 +111,7 @@ The sidecar is a public URL, so the Worker authenticates every request with that
 | A2 | **Data ingested offline and static** — a repeatable pipeline is started manually; no source APIs are called at request time | Live fetches during a demo are how demos die |
 | A3 | **Three presets, equally tuned** — Retail, Warehouse, EV Charging | Configurability is an explicit evaluation criterion; three presets prove it in one gesture |
 | A4 | **Validation = 30 sites labeled by all three of us** against a written rubric, plus ~10 known-good real locations and ~10 deliberately bad points | The brief says "expert-labeled". We aren't domain experts, so we use a documented rubric and report inter-rater agreement rather than overclaiming |
-| A5 | **H3 resolution 8** (~0.74 km²/cell). Austin city ≈ 1,200 cells | Small enough to fully precompute, fine enough to be useful |
+| A5 | **H3 resolution 8** (~0.74 km²/cell). The current Austin municipal-boundary build contains **1,021 cells** | Small enough to fully precompute, fine enough to be useful |
 
 ### 4.2 Out of scope
 
@@ -121,7 +121,7 @@ Teams/orgs/sharing (auth is login+signup only, for persisting saved sites) · pa
 
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
-| Render cold start kills a live interaction | High | High | §3.2 — sidecar off the critical path |
+| Render cold start delays the first heatmap or score request | High | High | §3.2 — cached compact payload, warmup state, and 10-minute keep-warm trigger; move the payload to Neon/R2 if this remains unreliable |
 | **Neon free tier is 0.5 GB**; raw OSM geometry exceeds it | High | High | §5.3 — DB holds analytics, R2 holds cartography |
 | Workers CPU limits on batch scoring | Med | Med | Runtime reads precomputed columns; heavy compute in sidecar; cap batches at 5,000 cells |
 | Drizzle can't model PostGIS polygons | Certain | Low | Designed around — §5.4 |
@@ -136,34 +136,34 @@ Teams/orgs/sharing (auth is login+signup only, for persisting saved sites) · pa
 
 Five is the requirement; we ship six.
 
-| # | Layer | Source | Format in | Table |
+| # | Layer | Source | Format in | Normalized target |
 |---|---|---|---|---|
-| 1 | Demographics | Census ACS 5-yr + TIGER tracts | Shapefile | `census_tracts` |
-| 2 | Transportation | OpenStreetMap (Geofabrik Texas) | PBF → GeoJSON | `roads` |
-| 3 | Points of interest | OSM POIs + synthetic competitor set | GeoJSON | `poi` |
-| 4 | Land use & zoning | City of Austin open data + OSM buildings | Shapefile | `zoning` |
-| 5 | Flood / hazard | FEMA National Flood Hazard Layer | Shapefile | `flood_zones` |
-| 6 | Air quality | EPA AQS daily summaries | CSV + WKT → **GeoTIFF** | `air_quality` |
+| 1 | Demographics | Census ACS 5-yr + TIGER tracts | JSON + zipped Shapefile | `h3_cell_fact` demographic columns |
+| 2 | Transportation | OpenStreetMap (Geofabrik Texas) | PBF | `h3_cell_fact` road columns |
+| 3 | Points of interest | OpenStreetMap tagged POIs | PBF | `h3_cell_fact` POI count columns |
+| 4 | Land use & zoning | City of Austin open data + OSM land use | ArcGIS GeoJSON + PBF | `h3_cell_fact` zoning columns |
+| 5 | Flood / hazard | FEMA data mirrored by City of Austin | ArcGIS GeoJSON | `h3_cell_fact` flood columns |
+| 6 | Air quality | EPA AQS daily summaries | CSV → **GeoTIFF** | `h3_cell_fact` PM2.5/AQI columns |
 
-**Format coverage, honestly accounted for:** *GeoJSON* — POI and all API geometry I/O. *Shapefile* — census, zoning, FEMA via GeoPandas/Fiona. *GeoTIFF* — AQI is IDW-interpolated to a raster, written as GeoTIFF, read back with `rasterio` during scoring; a genuine read path, not a checkbox. *WKT* — EPA point input, plus `areaWkt` accepted on `score.batch` and `hotspots.compute`.
+**Current format coverage, honestly accounted for:** *Shapefile* — Census TIGER place and tract snapshots. *PBF* — Geofabrik Texas OSM roads, POIs, buildings, and land-use tags. *GeoJSON* — Austin zoning and FEMA floodplain ArcGIS responses. *GeoTIFF* — EPA monitor values are interpolated to a raster, written as GeoTIFF, and read back with `rasterio` while building cell facts. *WKT* remains a later API input for custom study areas; it is not part of the current heatmap endpoint.
 
-DDL and GiST indexes for all six layer tables live in `pipeline/sql/`, applied by the ingest pipeline rather than by Drizzle (§5.4).
+The repeatable manual pipeline spatially joins all six sources offline and loads one normalized row per cell into `h3_cell_fact`. Dataset provenance and atomic activation live in `geo_source_snapshot`, `geo_dataset`, and `geo_active_dataset`; their DDL and GiST indexes live in `pipeline/sql/` and are applied outside Drizzle (§5.4).
 
-### 5.1 Synthetic competitor dataset
+### 5.1 POI classification
 
-Generated, not scraped — reproducible and license-clean. Competitor points are placed with a clustered point process (Thomas) weighted toward commercial zoning and population density, so placement looks like real retail siting rather than uniform noise. Seeded RNG, output committed as GeoJSON so everyone scores identically.
+The current pipeline classifies real OpenStreetMap POIs into competitor, complementary, and anchor categories, then aggregates counts at 500 m, 1 km, 2 km, and 5 km around each cell. A future synthetic or curated competitor layer may supplement these counts, but the active Austin dataset does not claim that such a dataset already exists.
 
 ### 5.2 The H3 grid — the backbone
 
-The metro is polyfilled at res 8 and every cell precomputes its demographics, road density and highway distance, competitor/complementary/anchor counts at several radii, dominant zone class, flood status, AQI, and per-layer subscores per preset.
+The Austin municipal boundary is polyfilled at resolution 8. Every cell stores demographics, road density and highway distance, competitor/complementary/anchor counts at several radii, dominant zone class, flood status, PM2.5, and AQI. Formula-based subscores are calculated by FastAPI from these facts; preset weights are not baked into ingestion.
 
-Heatmaps, hot-spot detection, batch scoring and catchment all read this one table. Live point scoring reads the containing cell for expensive aggregates and computes only the distance-sensitive terms fresh.
+Heatmaps, point scoring, batch scoring, and later hotspot detection read the active dataset's rows from this table. The heatmap returns weight-independent subscores so the browser can apply preset or custom weights without another server request.
 
 ### 5.3 Storage discipline: analytics in Postgres, cartography in R2
 
 Neon's free tier is 0.5 GB and raw Austin OSM geometry alone can exceed it. So:
 
-- **Postgres holds analysis-ready data** — the H3 table, tract polygons simplified to ~10 m tolerance, POI points, reachability. Roads are a simplified network for distance queries only.
+- **Postgres currently holds analysis-ready H3 facts** plus dataset provenance and application/auth tables. Precomputed reachability will be added later.
 - **R2 holds display geometry** — `tippecanoe` builds vector tiles for roads, zoning, flood and buildings; `pmtiles` packs them into single files in a public bucket, read client-side via the `pmtiles://` protocol.
 - **Building footprints never enter Postgres.** They're aggregated to per-hex area at ingest and rendered only from tiles.
 
@@ -176,7 +176,7 @@ Drizzle has no representation for PostGIS polygons. Rather than fight it:
 | Owned by | Tables | Migrations |
 |---|---|---|
 | **Drizzle** | Better Auth tables + `project`, `saved_site`, `comparison_set` | `drizzle-kit` |
-| **Raw SQL** | `census_tracts`, `roads`, `poi`, `zoning`, `flood_zones`, `air_quality`, `h3_cells`, `cell_reach` | `pipeline/sql/`, applied by the ingest pipeline |
+| **Raw SQL** | `geo_dataset`, `geo_source_snapshot`, `geo_active_dataset`, `h3_cell_fact`; later `cell_reach` | `pipeline/sql/`, applied by the ingest pipeline |
 
 Geo tables are **not** declared in the Drizzle schema — `drizzle-kit push` would try to drop columns it can't model. TypeScript reads them via `db.execute(sql\`...\`)` with geometry cast to GeoJSON text.
 
@@ -186,17 +186,20 @@ One design note worth keeping: `saved_site.score_snapshot` records what a site s
 
 ## 6. Sidecar API
 
-Owned by Megha. Five endpoints, all under `/v1` with bearer auth:
+Owned by Megha. `/health` is public; every `/v1` endpoint requires bearer authentication.
 
 | Endpoint | Purpose |
 |---|---|
+| `GET /v1/heatmap` | Compact active-dataset payload: dataset ID, H3 resolution, and each cell's H3 index, eligibility, and six weight-independent subscores. No geometry, coordinates, final weighted score, detailed constraints, hotspot fields, or ML output |
 | `POST /v1/score` | Composite score + weight-independent per-layer breakdown + constraint results for one point |
-| `POST /v1/score/batch` | Same for a point list, GeoJSON area, or WKT area. Hard cap 5,000 cells |
+| `POST /v1/score/batch` | Same for a point list, with a hard cap of 5,000 points |
 | `POST /v1/hotspots` | Getis-Ord Gi*, DBSCAN, or H3 binning; returns classified cells, clusters, and underserved areas |
 | `POST /v1/catchment` | Isochrone bands + catchment population, read from precomputed `cell_reach` |
 | `GET /v1/presets` · `/v1/validate/report` · `/health` | Config, validation metrics, warmup target |
 
 Exact request/response shapes are defined by the sidecar's OpenAPI schema (§3.1) and generated into the TypeScript client — they are deliberately not duplicated here, because a spec that restates a contract becomes the second place it can be wrong.
+
+`/v1/heatmap` is prepared once per active dataset and cached in the FastAPI process. deck.gl derives cell geometry directly from each H3 index. The browser calculates the initial weighted score and every slider update from the six subscores. It requests `/v1/score` only after a user clicks a cell, because that is when the verbose constraint breakdown is needed.
 
 Errors return `{error: {code, message, detail}}` with typed codes; an out-of-bounds coordinate returns `POINT_OUT_OF_BOUNDS` carrying the supported bbox, so the UI can say "outside the Austin coverage area" instead of showing a stack trace. tRPC maps these onto typed tRPC errors.
 
@@ -204,13 +207,13 @@ Errors return `{error: {code, message, detail}}` with typed codes; an out-of-bou
 
 ## 7. Routing and catchment — hex reachability
 
-Precompute owned by Swapnil, consumed by Megha and Vaid.
+Precompute owned by Swapnil, consumed by Megha and Vaidehi.
 
 OSRM can't run on Cloudflare, and calling a hosted routing API at request time adds a network dependency to the demo. So routing is **fully precomputed offline** — and the H3 grid makes this unusually clean.
 
 **Instead of contouring polygons, an isochrone is a set of hexes.**
 
-Boot OSRM locally in Docker on the Texas extract (`--max-table-size 4000`, car and foot profiles). For each of the ~3,500 cell centroids, request a duration matrix to all other centroids — chunked and checkpointed to disk. For each source, mode, and band (car 10/20/30, foot 10/20), keep the destinations under the threshold and write them to `cell_reach`. That's **~17,500 rows total.**
+Boot OSRM locally in Docker on the Texas extract (`--max-table-size 4000`, car and foot profiles). For each of the 1,021 cell centroids, request a duration matrix to all other centroids — chunked and checkpointed to disk. For each source, mode, and band (car 10/20/30, foot 10/20), keep the destinations under the threshold and write them to `cell_reach`. At the current coverage size, that is approximately **5,105 source/mode/band rows** before any schema-level packing or expansion.
 
 What this buys:
 
@@ -249,7 +252,7 @@ Zero competitors can mean an untapped market *or* a market already tried and aba
 s_competition(n) = 100 · exp( -(n - n*)² / (2σ_c²) )
 ```
 
-Retail peaks at 3 competitors within 1 km; warehouse peaks at 0 within 5 km (effectively monotonic decreasing — no agglomeration benefit for logistics); EV charging peaks at 1 within 2 km. Complementary businesses and anchor tenants are **separate features** scoring monotonically positive with decay, not the same feature with a sign flip. Tuned values live in `apps/geo/scoring/presets.yaml`.
+Retail peaks at 3 competitors within 1 km; warehouse peaks at 0 within 5 km (effectively monotonic decreasing — no agglomeration benefit for logistics); EV charging peaks at 1 within 2 km. Complementary businesses and anchor tenants are **separate features** scoring monotonically positive with decay, not the same feature with a sign flip. Current formulas and preset values live in `apps/fastapi/scoring.py`; they may move into dedicated configuration as the preset set grows.
 
 **Client-side re-scoring.** Because subscores are weight-independent, dragging a weight slider needs no server call — the frontend recomputes `Σ(w_i·s_i)/Σ(w_i)` over the cached subscores of every visible hex and recolors the deck.gl layer. Sub-100 ms, and the scoring *math* still lives only in Python. TypeScript performs one weighted average and nothing else; that constraint is what keeps two languages from drifting into two different models.
 
@@ -284,7 +287,7 @@ Labels are assigned against a written rubric **before anyone sees model output**
 
 ## 9. Frontend
 
-Owned by Vaid. TanStack Start + MapLibre GL + deck.gl, zustand, Tailwind + shadcn/ui.
+Owned by Vaidehi. TanStack Start + MapLibre GL + deck.gl, React state, Tailwind + shadcn/ui.
 
 **SSR caveat, handle first:** deck.gl and MapLibre touch `window` at import time. The whole map tree must be lazy-loaded behind a client-only boundary. Cheap on the first commit, miserable to retrofit.
 
@@ -315,21 +318,29 @@ Owned by Vaid. TanStack Start + MapLibre GL + deck.gl, zustand, Tailwind + shadc
 
 ## 10. Build phases
 
-Dependency-ordered, not calendar-bound. **`bun run dev` must work at the end of every phase**, even with features stubbed.
+These phases organize the work; they are not gates. Teammates may pull forward any task whose dependencies are ready, and work from several phases may proceed in parallel. Keep the main branch runnable while integrating each focused PR.
+
+### Current work
+
+**Megha — real-data FastAPI PR.** Replace `project.csv` with the active Neon dataset for `/v1/score` and `/v1/score/batch`; add the compact, cached `GET /v1/heatmap`; keep detailed constraints on click scoring; regenerate OpenAPI. Do not add hotspots, ML, or a Dockerfile in this PR.
+
+**Vaidehi — dashboard and map PR.** Own the visual redesign; build the header, full-screen map layout, toolbar, layer panel, legend, score sidebar, presets, six weight sliders, loading/empty/error states, H3 heatmap, hover, and click selection. Draw cells from `h3_index`, calculate weighted scores in the browser, and fetch detailed constraints only for the selected cell.
+
+**Swapnil — application API.** Add protected project and saved-site persistence with per-user ownership checks; then proxy the generated heatmap client through tRPC. Coordinate shared contracts and deployment configuration without duplicating Python scoring formulas in TypeScript.
 
 ### Phase 0 — Scaffold and freeze the contract
 
-**Swapnil** — run the scaffold; Neon + PostGIS + Hyperdrive; Better Auth signup/login end to end; Drizzle app tables; tRPC routers returning fixtures; local `docker-compose` with PostGIS + OSRM.
-**Megha** — FastAPI skeleton with every endpoint returning fixtures; Dockerfile deployed to Render with `/health` green; decay functions and composite math with unit tests, developed against local GeoJSON.
-**Vaid** — map renders Austin; **client-only boundary for deck.gl done properly now**; layer panel and weight sliders on local state; consuming fixtures via tRPC.
+**Swapnil** — scaffold complete; Neon + PostGIS + Hyperdrive connected; Better Auth signup/login working end to end; Drizzle app tables in place; tRPC wraps the generated FastAPI client; the repeatable ingestion pipeline has loaded its validated Austin H3 facts into Neon. Development and ingestion use Neon directly—there is no local PostGIS requirement.
+**Megha** — FastAPI provides `/health`, presets, point scoring, and batch scoring with bearer-token authentication, CORS controls, exact containing-cell H3 lookup, hard constraints, and formula-only composite scoring. It is deployed directly with Render's native Python runtime and `/health` is green. A FastAPI Dockerfile is deliberately deferred until Phase 3, when hotspot and heavier geospatial work begins.
+**Vaidehi** — the Austin map renders behind a client-only boundary and consumes scoring through tRPC. The broader redesign and heatmap interaction continue in parallel with backend work.
 
-*Exit:* OpenAPI frozen, `gen:geo` in CI, signup→login works, map renders, local PostGIS up.
+*Exit:* the committed OpenAPI snapshot matches FastAPI; `bun run gen:geo` reproducibly generates the TypeScript contract; production signup→login works; the Austin map renders; Cloudflare and Render are deployed and verified talking to each other; validated Austin facts are loaded into Neon. No local PostGIS or Docker setup is required for this phase.
 
 ### Phase 1 — Data foundation
 
-**Swapnil** — all six ingest scripts; DDL and GiST indexes; full res-8 grid built; tippecanoe → PMTiles → R2; geometry simplified to stay inside 0.5 GB.
-**Megha** — all six layer scorers on real PostGIS; percentile normalization; hard constraints; all three presets tuned.
-**Vaid** — real PMTiles layers; draw tools; loading and empty states.
+**Swapnil** — six-source ingestion, validation, DDL, GiST indexing, the 1,021-cell resolution-8 grid, and atomic Neon activation are complete; tippecanoe → PMTiles → R2 remains.
+**Megha** — move all formula scorers to the real active Neon dataset; retain percentile normalization, hard constraints, and preset tuning in Python.
+**Vaidehi** — consume the real H3 heatmap, then add PMTiles layers and drawing tools as their data becomes available.
 
 *Exit:* six layers queryable and visible, H3 grid fully populated.
 
@@ -337,21 +348,21 @@ Dependency-ordered, not calendar-bound. **`bun run dev` must work at the end of 
 
 **Megha** — `/score` and `/score/batch` on real data returning weight-independent subscores; narrative generation.
 **Swapnil** — tRPC `score.*` wrapping the generated client; sidecar warmup + cron ping; typed error mapping.
-**Vaid** — score panel on real data; waterfall; constraint checklist; **client-side weight re-scoring wired to the heatmap**.
+**Vaidehi** — score panel on real data; waterfall; constraint checklist; **client-side weight re-scoring wired to the heatmap**.
 
 *Exit:* click any point → a real score with a real breakdown, and a weight slider visibly reshapes the map. **Make-or-break phase; everything after is additive.**
 
 ### Phase 3 — Spatial analytics and accessibility
 
-**Megha** — Getis-Ord Gi*; DBSCAN on high-score candidates; underserved-area detection; `/catchment` reading `cell_reach`.
+**Megha** — add the FastAPI Dockerfile for the heavier geospatial runtime; Getis-Ord Gi*; DBSCAN on high-score candidates; underserved-area detection; `/catchment` reading `cell_reach`.
 **Swapnil** — the full OSRM duration matrix, chunked and checkpointed; `cell_reach` populated for car and foot; tRPC routing endpoints reading straight from Postgres.
-**Vaid** — hot-spot layer with diverging ramp; underserved view; isochrone bands + catchment table.
+**Vaidehi** — hot-spot layer with diverging ramp; underserved view; isochrone bands + catchment table.
 
 *Exit:* hot-spots, cold-spots and underserved areas render; catchment works for car and walk.
 
 ### Phase 4 — Product surface
 
-**Vaid** — compare tray; PDF + GeoJSON export; saved sites UI; polish, legends, empty states, error toasts.
+**Vaidehi** — compare tray; PDF + GeoJSON export; saved sites UI; polish, legends, empty states, error toasts.
 **Swapnil** — `sites` and `presets` routers on `protectedProcedure`; score snapshots on save; response caching; performance pass against §9.
 **Megha** — label the 30-site validation set against the rubric, **all three of us independently, before looking at any model output**; run validation; tune weights if results are poor and document what changed and why.
 
@@ -393,25 +404,25 @@ Only after §12 is green, in priority order:
 |---|---|---|
 | ≥5 geospatial layers | §5 — six shipped | Swapnil |
 | GeoJSON / Shapefile / GeoTIFF / WKT | §5 — all four with real read paths | Swapnil |
-| Configurable weights | §8.1, presets + live sliders | Megha / Vaid |
+| Configurable weights | §8.1, presets + live sliders | Megha / Vaidehi |
 | Distance decay functions | §8.2 | Megha |
 | Competitive density analysis | §8.3 — inverted-U | Megha |
 | Threshold constraints | §8.5 | Megha |
 | Clustering / hot-spots | §6 — Gi*, DBSCAN, H3 binning | Megha |
-| Interactive map | §9 | Vaid |
-| Click for score breakdown | §9 ScorePanel | Vaid |
-| Layer toggles | §9 LayerPanel | Vaid |
-| Draw custom polygons | §9 → `score.batch` | Vaid |
-| Compare multiple sites | §9 CompareTray | Vaid |
-| Export reports | §9 — PDF + GeoJSON | Vaid |
+| Interactive map | §9 | Vaidehi |
+| Click for score breakdown | §9 ScorePanel | Vaidehi |
+| Layer toggles | §9 LayerPanel | Vaidehi |
+| Draw custom polygons | §9 → `score.batch` | Vaidehi |
+| Compare multiple sites | §9 CompareTray | Vaidehi |
+| Export reports | §9 — PDF + GeoJSON | Vaidehi |
 | Routing / isochrones | §7 — precomputed OSRM, car + foot | Swapnil |
 | Catchment 10/20/30 min | §6, §7 | Megha / Swapnil |
 | Validated vs. expert-labeled sites | §8.6 | Megha |
-| Python · GeoPandas · Shapely · H3 · sklearn | `apps/geo`, `pipeline/` | Megha / Swapnil |
-| FastAPI | `apps/geo` | Megha |
+| Python · GeoPandas · Shapely · H3 · sklearn | `apps/fastapi`, `pipeline/` | Megha / Swapnil |
+| FastAPI | `apps/fastapi` | Megha |
 | PostGIS | §5.4 — Neon + PostGIS, raw-SQL migrations | Swapnil |
-| Vector tiles + MapLibre | §5.3 — tippecanoe → PMTiles → R2 | Swapnil / Vaid |
-| React frontend + map library | §9 — TanStack Start | Vaid |
+| Vector tiles + MapLibre | §5.3 — tippecanoe → PMTiles → R2 | Swapnil / Vaidehi |
+| React frontend + map library | §9 — TanStack Start | Vaidehi |
 
 Every line in the brief maps to a deliverable and an owner. Nothing is unassigned.
 
@@ -420,7 +431,7 @@ Every line in the brief maps to a deliverable and an owner. Nothing is unassigne
 ## 13. Definition of done
 
 - [ ] Fresh clone → `bun install` → `bun run dev` works on a clean machine
-- [ ] `wrangler deploy` + Render deploy both live and talking to each other
+- [x] Cloudflare + Render deploys are live and verified talking to each other
 - [ ] Six layers ingested, queryable, visible on the map
 - [ ] Signup → login → save a project and its sites → they persist
 - [ ] Clicking any point returns a scored breakdown in < 600 ms warm
