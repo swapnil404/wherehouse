@@ -10,6 +10,7 @@ import geopandas as gpd
 import h3
 import numpy as np
 import pandas as pd
+import pyogrio
 import rasterio
 from rasterio.transform import from_origin
 from shapely.geometry import Polygon
@@ -111,12 +112,18 @@ def _tags(row: pd.Series) -> dict[str, str]:
 
 def _read_osm_layer(layer: str, boundary: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     path = RAW_DIR / "texas-latest.osm.pbf"
+    if layer == "multipolygons":
+        gdal_temp_dir = PROCESSED_DIR / ".gdal-tmp"
+        gdal_temp_dir.mkdir(parents=True, exist_ok=True)
+        pyogrio.set_gdal_config_options({"CPL_TMPDIR": str(gdal_temp_dir)})
     data = gpd.read_file(
         path,
         layer=layer,
         bbox=tuple(boundary.total_bounds),
         engine="pyogrio",
-        use_arrow=True,
+        # GDAL's OSM driver can return an empty multipolygons layer through
+        # the Arrow read path even when the PBF contains polygon features.
+        use_arrow=layer != "multipolygons",
     )
     if data.crs is None:
         data = data.set_crs(WGS84)

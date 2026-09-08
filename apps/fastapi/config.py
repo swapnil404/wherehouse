@@ -20,3 +20,5 @@ if not GEO_SERVICE_TOKEN:
 ALLOWED_ORIGINS = [
     o.strip() for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.strip()
 ]
+
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()

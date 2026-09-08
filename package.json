@@ -30,7 +30,7 @@
     "build": "turbo run build",
     "check-types": "turbo run check-types",
     "gen:geo": "bun scripts/gen-geo.ts",
-    "dev:web": "turbo run dev -F web --",
+    "dev:web": "bun run --cwd packages/infra dev",
     "db:push": "turbo run db:push -F @wherehouse/db --",
     "db:studio": "turbo run db:studio -F @wherehouse/db --",
     "db:generate": "turbo run db:generate -F @wherehouse/db --",
