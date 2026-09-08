@@ -4,6 +4,7 @@ import { z } from "zod";
 import { protectedProcedure, publicProcedure, router } from "../index";
 import {
   GeoServiceError,
+  getHeatmap,
   getPresets,
   scoreBatch,
   scorePoint,
@@ -15,6 +16,7 @@ const pointSchema = z.object({
 });
 
 const weightsSchema = z.record(z.string(), z.number().finite().nonnegative());
+const presetSchema = z.enum(["warehouse", "retail"]);
 
 function mapGeoError(error: unknown): never {
   if (!(error instanceof GeoServiceError)) {
@@ -45,6 +47,15 @@ export const appRouter = router({
     };
   }),
   geo: router({
+    heatmap: protectedProcedure
+      .input(z.object({ preset: presetSchema.default("warehouse") }))
+      .query(async ({ input }) => {
+        try {
+          return await getHeatmap(input.preset);
+        } catch (error) {
+          return mapGeoError(error);
+        }
+      }),
     presets: protectedProcedure.query(async () => {
       try {
         return await getPresets();
@@ -55,6 +66,7 @@ export const appRouter = router({
     score: protectedProcedure
       .input(z.object({
         point: pointSchema,
+        preset: presetSchema.default("warehouse"),
         weights: weightsSchema.nullish(),
       }))
       .mutation(async ({ input }) => {
@@ -67,6 +79,7 @@ export const appRouter = router({
     scoreBatch: protectedProcedure
       .input(z.object({
         points: z.array(pointSchema).min(1).max(5000),
+        preset: presetSchema.default("warehouse"),
         weights: weightsSchema.nullish(),
       }))
       .mutation(async ({ input }) => {

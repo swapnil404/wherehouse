@@ -82,6 +82,7 @@ Set `GEO_SERVICE_URL` and `GEO_SERVICE_TOKEN` in `apps/web/.env`. Both applicati
 The TanStack server exposes these tRPC procedures:
 
 - `geo.presets`
+- `geo.heatmap`
 - `geo.score`
 - `geo.scoreBatch`
 
@@ -92,6 +93,8 @@ bun run gen:geo
 ```
 
 This command exports `apps/fastapi/openapi.json`. It then updates the generated TypeScript types in `packages/api/src/geo`.
+
+Run the FastAPI scoring and heatmap contract tests with `just geo-test`.
 
 ## Offline Data Ingestion
 

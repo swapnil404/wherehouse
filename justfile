@@ -48,6 +48,10 @@ geo-health:
     @curl --fail --silent --show-error http://localhost:8000/health
     @echo
 
+# Run FastAPI scoring and heatmap contract tests.
+geo-test:
+    cd apps/fastapi && .venv/bin/python -m unittest discover -s tests -v
+
 # Create the offline ingestion environment and install it.
 ingest-setup:
     python -m venv pipeline/.venv

@@ -95,6 +95,15 @@ def validate_facts(path: Path) -> list[Check]:
     for column in nonnegative_columns:
         valid = np.isfinite(frame[column]).all() and (frame[column] >= 0).all()
         checks.append(Check(f"nonnegative_{column}", bool(valid), ""))
+
+    competitor_total = int(frame["competitor_count_5km"].sum())
+    checks.append(
+        Check(
+            "competitor_coverage",
+            competitor_total > 0,
+            f"total_5km_count={competitor_total}",
+        )
+    )
     for column in (
         "commercial_area_pct",
         "industrial_area_pct",
