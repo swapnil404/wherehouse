@@ -15,6 +15,14 @@ PRESET_WEIGHTS = {
         "demographics": 0.28, "transport": 0.12, "poi": 0.30,
         "zoning": 0.14, "flood": 0.10, "aqi": 0.06,
     },
+    # EV charging: corridor visibility (transport) and dwell-time amenities
+    # (poi: food/retail while charging) dominate; demographics reflects
+    # the nearby resident profile; zoning/flood are secondary.
+    # Initial values — Megha to tune against the validation set (spec 8.6).
+    "ev": {
+        "demographics": 0.20, "transport": 0.30, "poi": 0.22,
+        "zoning": 0.14, "flood": 0.08, "aqi": 0.06,
+    },
 }
 DEFAULT_WEIGHTS = PRESET_WEIGHTS["warehouse"]
 
@@ -26,7 +34,11 @@ PRESET_CONFIG = {
         "competitor_width": 3,
         "complementary_column": "complementary_count_5km_percentile",
         "anchor_column": "anchor_count_5km_percentile",
+        "poi_competition_weight": 0.45,
+        "poi_complementary_weight": 0.30,
+        "poi_anchor_weight": 0.25,
         "zone_scores": {"industrial": 95, "commercial": 55, "agricultural": 35, "residential": 15},
+        "zone_bonus_column": "industrial_area_pct", "zone_bonus_scale": 0.50,
     },
     "retail": {
         "income_target": 70_000, "income_width": 30_000,
@@ -35,13 +47,40 @@ PRESET_CONFIG = {
         "competitor_width": 2,
         "complementary_column": "complementary_count_1km_percentile",
         "anchor_column": "anchor_count_2km_percentile",
+        "poi_competition_weight": 0.45,
+        "poi_complementary_weight": 0.30,
+        "poi_anchor_weight": 0.25,
         "zone_scores": {"industrial": 25, "commercial": 95, "agricultural": 15, "residential": 45},
+        "zone_bonus_column": "commercial_area_pct", "zone_bonus_scale": 0.25,
+    },
+    # EV charging formula. Rationale per layer:
+    # - income band set above retail: early EV adoption skews higher-income.
+    # - highway scale 5 km: corridor visibility matters, tighter than
+    #   warehouse (10 km) but looser than retail (3 km).
+    # - competition: competitor_count_2km counts warehouse/industrial
+    #   competitors from the ingestion pipeline — NOT charging stations —
+    #   and has no meaningful relationship to charger suitability, so the
+    #   EV poi blend uses only real available fields: 55% complementary
+    #   (amenities worth a charging stop) and 45% anchor footfall.
+    # - complementary uses the 2 km ring: amenities worth a charging stop.
+    # - commercial frontage preferred; industrial acceptable for depots.
+    "ev": {
+        "income_target": 85_000, "income_width": 40_000,
+        "age_target": 38, "age_width": 18, "highway_scale_km": 5,
+        "complementary_column": "complementary_count_2km_percentile",
+        "anchor_column": "anchor_count_2km_percentile",
+        "poi_competition_weight": 0.0,
+        "poi_complementary_weight": 0.55,
+        "poi_anchor_weight": 0.45,
+        "zone_scores": {"industrial": 60, "commercial": 95, "agricultural": 15, "residential": 40},
+        "zone_bonus_column": "commercial_area_pct", "zone_bonus_scale": 0.25,
     },
 }
 
 PERCENTILE_COLUMNS = (
     "population_density", "road_density", "complementary_count_1km",
-    "complementary_count_5km", "anchor_count_2km", "anchor_count_5km", "aqi",
+    "complementary_count_2km", "complementary_count_5km", "anchor_count_2km",
+    "anchor_count_5km", "aqi",
 )
 
 
@@ -75,23 +114,24 @@ def compute_subscores(row: Any, preset: str = "warehouse") -> Dict[str, float]:
     highway_access = np.exp(-float(row["highway_distance_km"]) / config["highway_scale_km"])
     transport = 100 * (0.40 * row["road_density_percentile"] + 0.60 * highway_access)
 
-    competitor_count = float(row[config["competitor_column"]])
-    competition = np.exp(
-        -((competitor_count - config["competitor_target"]) ** 2)
-        / (2 * config["competitor_width"] ** 2)
-    )
+    competition_weight = float(config.get("poi_competition_weight", 0.45))
+    competition = 0.0
+    if competition_weight and config.get("competitor_column"):
+        competitor_count = float(row[config["competitor_column"]])
+        competition = np.exp(
+            -((competitor_count - config["competitor_target"]) ** 2)
+            / (2 * config["competitor_width"] ** 2)
+        )
     poi = 100 * (
-        0.45 * competition
-        + 0.30 * row[config["complementary_column"]]
-        + 0.25 * row[config["anchor_column"]]
+        competition_weight * competition
+        + float(config.get("poi_complementary_weight", 0.30)) * row[config["complementary_column"]]
+        + float(config.get("poi_anchor_weight", 0.25)) * row[config["anchor_column"]]
     )
 
     zone_class = str(row["dominant_zone_class"]).lower()
     zoning = float(config["zone_scores"].get(zone_class, 40))
-    if preset == "warehouse":
-        zoning = min(100, zoning + 0.50 * float(row["industrial_area_pct"]))
-    else:
-        zoning = min(100, zoning + 0.25 * float(row["commercial_area_pct"]))
+    bonus = config["zone_bonus_scale"] * float(row[config["zone_bonus_column"]])
+    zoning = min(100, zoning + bonus)
 
     flood = 0 if bool(row["in_sfha"]) else (100 if str(row["flood_zone"]).upper() == "X" else 55)
     aqi = 100 * (1 - float(row["aqi_percentile"]))
@@ -138,6 +178,31 @@ def evaluate_constraints(row: Any, preset: str = "warehouse") -> List[Dict[str, 
             "label": f"Zone class '{zone_class}' (requires commercial/residential)",
             "actual": zone_class, "required": allowed, "pass": zone_class in allowed,
         })
+    if preset == "ev":
+        # EV charging constraints. Rationale:
+        # - commercial frontage for visibility and dwell amenities;
+        #   industrial allowed for fleet/depot charging. This replaces the
+        #   retail zone rule above, which does not admit industrial.
+        # - 5 km highway cap mirrors the scoring scale: beyond that the
+        #   site is not a corridor stop.
+        # - No commercial-area floor: it would wrongly reject the
+        #   industrial sites this preset explicitly admits.
+        constraints = [c for c in constraints if c["id"] != "dominant_zone_class"]
+        allowed = ["commercial", "industrial"]
+        constraints.append({
+            "id": "dominant_zone_class",
+            "label": f"Zone class '{zone_class}' (requires commercial/industrial)",
+            "actual": zone_class, "required": allowed, "pass": zone_class in allowed,
+        })
+        highway_distance = float(row["highway_distance_km"])
+        constraints.append({
+            "id": "highway_distance_km",
+            "label": f"Highway distance {highway_distance:.1f} km (max 5 km)",
+            "actual": round(highway_distance, 2), "required": 5.0,
+            "pass": highway_distance <= 5.0,
+        })
+    elif preset not in ("warehouse", "retail"):
+        raise ValueError(f"Unknown scoring preset: {preset!r}")
     return constraints
 
 
