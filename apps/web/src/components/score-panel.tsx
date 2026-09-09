@@ -7,7 +7,12 @@ import {
   XIcon,
 } from "lucide-react";
 
-import { SUBSCORE_LABELS, type SubscoreKey, type Subscores, type Weights } from "@/lib/cells";
+import {
+  SUBSCORE_LABELS,
+  type SubscoreKey,
+  type Subscores,
+  type Weights,
+} from "@/lib/cells";
 import {
   computeWaterfall,
   gradeFor,
@@ -29,10 +34,16 @@ import {
 
 interface ScoreData {
   h3_index: string;
-  score: number;
+  score: number | null;
   eligible: boolean;
   subscores: Subscores;
-  constraints: readonly { id: string; label: string; pass: boolean }[];
+  constraints: readonly {
+    id: string;
+    label: string;
+    actual?: unknown;
+    required?: unknown;
+    pass: boolean;
+  }[];
 }
 
 interface ScorePanelProps {
@@ -66,6 +77,15 @@ function DeltaBar({ delta, scale }: { delta: number; scale: number }) {
   );
 }
 
+function formatConstraintValue(value: unknown): string {
+  if (Array.isArray(value))
+    return value.map(formatConstraintValue).join(" or ");
+  if (value === null || value === undefined) return "—";
+  if (typeof value === "boolean") return value ? "yes" : "no";
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
 export default function ScorePanel({
   isPending,
   error,
@@ -74,7 +94,10 @@ export default function ScorePanel({
   weights,
 }: ScorePanelProps) {
   const ready = data && analytics && weights;
-  const percentile = ready ? percentileOf(data.score, analytics.sortedScores) : null;
+  const percentile =
+    ready && data.score != null
+      ? percentileOf(data.score, analytics.sortedScores)
+      : null;
   const waterfall = ready
     ? computeWaterfall(data.subscores, analytics.subscoreMeans, weights)
     : null;
@@ -108,7 +131,9 @@ export default function ScorePanel({
                 Site score
               </p>
               <div className="flex items-baseline gap-2">
-                <span className="text-3xl font-semibold tabular-nums">{data.score}</span>
+                <span className="text-3xl font-semibold tabular-nums">
+                  {data.score == null ? "—" : data.score.toFixed(1)}
+                </span>
                 {percentile != null ? (
                   <span className="text-lg font-medium text-muted-foreground">
                     {gradeFor(percentile)}
@@ -137,7 +162,8 @@ export default function ScorePanel({
 
           {percentile != null ? (
             <p className="mt-1 text-[11px] text-muted-foreground">
-              Better than {percentile.toFixed(0)}% of {analytics!.cellCount} Austin cells
+              Better than {percentile.toFixed(0)}% of {analytics!.cellCount}{" "}
+              Austin cells
             </p>
           ) : null}
 
@@ -148,12 +174,17 @@ export default function ScorePanel({
               </p>
               <div className="mt-1 flex items-baseline justify-between text-[11px] text-muted-foreground">
                 <span>Average cell</span>
-                <span className="tabular-nums">{waterfall.baseline.toFixed(1)}</span>
+                <span className="tabular-nums">
+                  {waterfall.baseline.toFixed(1)}
+                </span>
               </div>
 
               <div className="mt-1.5 space-y-1.5">
                 {waterfall.contributions.map((c) => (
-                  <div key={c.key} className="flex items-center gap-2 text-[11px]">
+                  <div
+                    key={c.key}
+                    className="flex items-center gap-2 text-[11px]"
+                  >
                     <span className="w-20 shrink-0 truncate text-muted-foreground">
                       {SUBSCORE_LABELS[c.key as SubscoreKey]}
                     </span>
@@ -171,7 +202,9 @@ export default function ScorePanel({
 
               <div className="mt-2 flex items-baseline justify-between border-t border-border pt-1.5 text-[11px]">
                 <span className="text-muted-foreground">This site</span>
-                <span className="font-medium tabular-nums">{waterfall.total.toFixed(1)}</span>
+                <span className="font-medium tabular-nums">
+                  {waterfall.total.toFixed(1)}
+                </span>
               </div>
             </div>
           ) : null}
@@ -182,13 +215,28 @@ export default function ScorePanel({
             </p>
             <div className="mt-1.5 space-y-1.5">
               {data.constraints.map((constraint) => (
-                <div key={constraint.id} className="flex items-start gap-2 text-xs">
+                <div
+                  key={constraint.id}
+                  className="flex items-start gap-2 text-xs"
+                >
                   {constraint.pass ? (
-                    <CheckIcon className="mt-0.5 size-3.5 shrink-0" style={{ color: "#0ca30c" }} />
+                    <CheckIcon
+                      className="mt-0.5 size-3.5 shrink-0"
+                      style={{ color: "#0ca30c" }}
+                    />
                   ) : (
-                    <XIcon className="mt-0.5 size-3.5 shrink-0" style={{ color: "#d03b3b" }} />
+                    <XIcon
+                      className="mt-0.5 size-3.5 shrink-0"
+                      style={{ color: "#d03b3b" }}
+                    />
                   )}
-                  <span className="text-muted-foreground">{constraint.label}</span>
+                  <span className="min-w-0 text-muted-foreground">
+                    <span className="block">{constraint.label}</span>
+                    <span className="block text-[10px] text-muted-foreground/70">
+                      Actual: {formatConstraintValue(constraint.actual)} ·
+                      Required: {formatConstraintValue(constraint.required)}
+                    </span>
+                  </span>
                 </div>
               ))}
             </div>

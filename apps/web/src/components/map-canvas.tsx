@@ -1,7 +1,11 @@
 import { H3HexagonLayer } from "@deck.gl/geo-layers";
 import { MapboxOverlay } from "@deck.gl/mapbox";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { CircleAlertIcon, LoaderCircleIcon, TriangleAlertIcon } from "lucide-react";
+import {
+  CircleAlertIcon,
+  LoaderCircleIcon,
+  TriangleAlertIcon,
+} from "lucide-react";
 import maplibregl from "maplibre-gl";
 import { Protocol } from "pmtiles";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -36,7 +40,8 @@ import { useTRPC } from "@/utils/trpc";
 const AUSTIN = { lng: -97.7431, lat: 30.2672 };
 
 /** CARTO dark matter — free, no API key, OSM-attributed. */
-const BASEMAP_STYLE = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
+const BASEMAP_STYLE =
+  "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
 
 const EMPTY_CELLS: HeatmapCell[] = [];
 
@@ -84,6 +89,7 @@ export default function MapCanvas() {
 
   const scorePoint = useMutation(trpc.geo.score.mutationOptions());
   const scorePointRef = useRef(scorePoint.mutate);
+  const selectedPointRef = useRef<{ lat: number; lon: number } | null>(null);
   scorePointRef.current = scorePoint.mutate;
 
   // Weight-independent subscores: the grid is fetched once per preset and the
@@ -124,7 +130,23 @@ export default function MapCanvas() {
     [cells, eligibleOnly],
   );
 
-  const selectedH3 = scorePoint.data?.h3_index ?? null;
+  const selectedData = useMemo(() => {
+    if (!scorePoint.data) return null;
+    return {
+      ...scorePoint.data,
+      score: compositeScore(scorePoint.data.subscores, weights),
+    };
+  }, [scorePoint.data, weights]);
+  const selectedH3 = selectedData?.h3_index ?? null;
+
+  // Subscores and hard constraints vary by preset, so refresh the selected
+  // cell when the use case changes. Weight-only edits stay local: the selected
+  // composite above and every heatmap cell use the same weighted average.
+  useEffect(() => {
+    const point = selectedPointRef.current;
+    if (!point) return;
+    scorePointRef.current({ point, preset });
+  }, [preset]);
 
   // The tooltip closure is built once with the overlay, so it reads the active
   // preset's weights through a ref rather than capturing a stale value.
@@ -144,8 +166,14 @@ export default function MapCanvas() {
       attributionControl: { compact: true },
     });
 
-    map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
-    map.addControl(new maplibregl.ScaleControl({ unit: "metric" }), "bottom-left");
+    map.addControl(
+      new maplibregl.NavigationControl({ visualizePitch: true }),
+      "top-right",
+    );
+    map.addControl(
+      new maplibregl.ScaleControl({ unit: "metric" }),
+      "bottom-left",
+    );
     map.getCanvas().style.cursor = "crosshair";
 
     map.on("load", () => {
@@ -153,14 +181,31 @@ export default function MapCanvas() {
       // we add goes below it, so street and place names stay on top of both
       // the overlays and the hexes. Found by scanning rather than hardcoding
       // an id, so a CARTO style revision cannot silently bury the labels.
-      const labelStart = map.getStyle().layers.find((l) => l.type === "symbol")?.id;
+      const labelStart = map
+        .getStyle()
+        .layers.find((l) => l.type === "symbol")?.id;
 
       if (PMTILES_BASE_URL) {
         for (const layer of TILE_LAYERS) {
-          map.addSource(layer.sourceId, { type: "vector", url: archiveUrl(layer) });
+          map.addSource(layer.sourceId, {
+            type: "vector",
+            url: archiveUrl(layer),
+          });
+          const state = useMapStore.getState().layers[layer.id];
+          const initialStyle = {
+            ...layer.style,
+            layout: {
+              ...layer.style.layout,
+              visibility: state.visible ? "visible" : "none",
+            },
+            paint: {
+              ...layer.style.paint,
+              [layer.opacityProperty]: state.opacity,
+            },
+          } as maplibregl.LayerSpecification;
           // Each insert lands immediately below `labelStart`, so the layers
           // stack in array order: zoning at the bottom, roads on top.
-          map.addLayer(layer.style, labelStart);
+          map.addLayer(initialStyle, labelStart);
         }
       }
 
@@ -168,13 +213,18 @@ export default function MapCanvas() {
       // basemap, hexes, overlays, labels. With no tiles configured there is no
       // overlay to sit under, so they anchor to the label boundary instead —
       // anchoring to a layer that was never added would throw in `addLayer`.
-      setDeckAnchor({ beforeId: PMTILES_BASE_URL ? TILE_LAYERS[0].style.id : labelStart });
+      setDeckAnchor({
+        beforeId: PMTILES_BASE_URL ? TILE_LAYERS[0].style.id : labelStart,
+      });
     });
 
     map.on("click", ({ lngLat }) => {
-      const { preset: activePreset, customWeights: edits } = useMapStore.getState();
+      const { preset: activePreset, customWeights: edits } =
+        useMapStore.getState();
+      const point = { lat: lngLat.lat, lon: lngLat.lng };
+      selectedPointRef.current = point;
       scorePointRef.current({
-        point: { lat: lngLat.lat, lon: lngLat.lng },
+        point,
         preset: activePreset,
         // Send slider edits so the panel's score matches the hex the user
         // clicked. Omitted when unedited, letting the server use the preset's
@@ -266,7 +316,8 @@ export default function MapCanvas() {
               id: "score-heatmap",
               data: visibleCells,
               getHexagon: (d) => d.h3Index,
-              getFillColor: (d) => colorForScore(compositeScore(d.subscores, weights)),
+              getFillColor: (d) =>
+                colorForScore(compositeScore(d.subscores, weights)),
               // A soft seam rather than a border — see `HEX_SEAM_RGBA`. Kept
               // at a 1px minimum: thinner lands on sub-pixel widths, where
               // antialiasing thins the seam again on top of the alpha and it
@@ -334,8 +385,16 @@ export default function MapCanvas() {
 
     for (const layer of TILE_LAYERS) {
       const state = mapLayers[layer.id];
-      map.setLayoutProperty(layer.style.id, "visibility", state.visible ? "visible" : "none");
-      map.setPaintProperty(layer.style.id, layer.opacityProperty, state.opacity);
+      map.setLayoutProperty(
+        layer.style.id,
+        "visibility",
+        state.visible ? "visible" : "none",
+      );
+      map.setPaintProperty(
+        layer.style.id,
+        layer.opacityProperty,
+        state.opacity,
+      );
     }
   }, [deckAnchor, mapLayers]);
 
@@ -406,7 +465,7 @@ export default function MapCanvas() {
       <ScorePanel
         isPending={scorePoint.isPending}
         error={scorePoint.error}
-        data={scorePoint.data ?? null}
+        data={selectedData}
         analytics={stats?.analytics ?? null}
         weights={weightsReady ? weights : null}
       />

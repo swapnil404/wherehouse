@@ -18,6 +18,9 @@ import { useMapStore } from "@/stores/map-store";
  */
 export default function HeatmapLegend() {
   const stats = useMapStore((s) => s.heatmapStats);
+  const visible = useMapStore((s) => s.layers.heatmap.visible);
+
+  if (!visible) return null;
 
   const span = SCORE_BINS[SCORE_BINS.length - 1].max - SCORE_BINS[0].min;
 
@@ -67,7 +70,9 @@ export default function HeatmapLegend() {
             <span
               key={bin.min}
               className="absolute -translate-x-1/2"
-              style={{ left: `${((bin.min - SCORE_BINS[0].min) / span) * 100}%` }}
+              style={{
+                left: `${((bin.min - SCORE_BINS[0].min) / span) * 100}%`,
+              }}
             >
               {bin.min}
             </span>
