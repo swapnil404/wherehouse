@@ -18,7 +18,9 @@ export default function UserMenu() {
   const { data: session, isPending } = authClient.useSession();
 
   if (isPending) {
-    return <Skeleton className="h-9 w-24" />;
+    // Matches the Button's default `h-8` so the header does not shift when the
+    // session resolves.
+    return <Skeleton className="h-8 w-24" />;
   }
 
   if (!session) {
