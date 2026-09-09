@@ -139,6 +139,53 @@ inactive while its rows and provenance are inserted. The `geo_active_dataset` po
 same transaction only after the complete dataset is present, so the application cannot observe a
 partially loaded refresh.
 
+## PMTiles Map Layers
+
+The map's roads, zoning, flood, and building overlays are built separately from the Neon facts.
+They are display geometry only: these commands do not write to Neon or change scoring.
+
+Prepare all four layers from the existing source snapshots, build them with Tippecanoe 2.17 or
+newer, and validate the outputs:
+
+```bash
+just tiles-prepare
+just tiles-build
+just tiles-validate
+```
+
+Pass layer names to work on a smaller slice. For example:
+
+```bash
+just tiles-prepare zoning
+just tiles-build zoning
+just tiles-validate zoning
+```
+
+Intermediate FlatGeobuf and generated `.pmtiles` files stay under the ignored
+`pipeline/data/processed/tiles/` directory. The four vector layers retain only the attributes the
+UI needs. Their zoom ranges are roads 8–16, zoning and flood 9–16, and buildings 13–17.
+
+Neon Object Storage is declared in the root `neon.ts` as a public-read bucket named
+`wherehouse-map-data`. Link this repository to the existing Neon project once, then provision the
+bucket:
+
+```bash
+bunx neon login
+bunx neon link
+just tiles-storage-plan
+just tiles-storage-deploy
+just tiles-upload
+```
+
+The uploader uses the authenticated Neon CLI, so no separate AWS or Cloudflare credentials are
+needed. To target a different declared bucket, run the upload with
+`NEON_STORAGE_BUCKET=your-bucket-name`.
+
+Copy the public object URLs from Neon into the frontend configuration. Before wiring them into
+MapLibre, confirm the public endpoint returns byte-range responses and permits requests from the
+production web origin. Rebuild and upload a layer with the same name only when intentionally
+publishing a new snapshot.
+
 ## UI Customization
 
 React web apps in this stack share shadcn/ui primitives through `packages/ui`.
@@ -189,7 +236,7 @@ Configure the FastAPI sidecar with `apps/fastapi` as its root directory.
 
 - Build command: `pip install -r requirements.txt`
 - Start command: `uvicorn main:app --host 0.0.0.0 --port $PORT`
-- Required environment variables: `GEO_SERVICE_TOKEN` and `ALLOWED_ORIGINS`
+- Required environment variables: `DATABASE_URL`, `GEO_SERVICE_TOKEN`, and `ALLOWED_ORIGINS`
 
 The Cloudflare deployment also creates a `geo-keep-warm` scheduled Worker. Every 10 minutes, it requests `${GEO_SERVICE_URL}/health` so the Render sidecar stays warm for demos. The schedule is configured in `packages/infra/alchemy.run.ts`.
 

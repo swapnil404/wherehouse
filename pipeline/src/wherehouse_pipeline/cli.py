@@ -10,6 +10,7 @@ from .config import FACTS_PATH, MANIFEST_PATH, PIPELINE_DIR, STATIC_SOURCES
 from .database import load_and_promote
 from .download import download_sources
 from .validation import require_valid, validate_facts
+from .tiles import build_pmtiles, prepare_tile_sources, validate_pmtiles
 
 
 def _print_checks(checks) -> None:
@@ -49,6 +50,18 @@ def main() -> None:
     subparsers.add_parser("load", help="load and atomically activate validated facts in Neon")
     run_parser = subparsers.add_parser("run", help="download, build, validate, and load")
     run_parser.add_argument("--refresh", action="store_true", help="replace cached downloads")
+    for command, help_text in (
+        ("tiles-prepare", "prepare display geometry as FlatGeobuf"),
+        ("tiles-build", "build PMTiles from prepared display geometry"),
+        ("tiles-validate", "validate generated PMTiles files"),
+    ):
+        tile_parser = subparsers.add_parser(command, help=help_text)
+        tile_parser.add_argument(
+            "layers",
+            nargs="*",
+            choices=("roads", "zoning", "flood", "buildings"),
+            help="layers to process; defaults to all four",
+        )
     args = parser.parse_args()
 
     if args.command == "plan":
@@ -72,6 +85,12 @@ def main() -> None:
         print(f"Wrote {build_facts()}")
         _print_checks(require_valid(FACTS_PATH))
         print(f"Activated Neon dataset {load_and_promote(FACTS_PATH)}")
+    elif args.command == "tiles-prepare":
+        prepare_tile_sources(args.layers)
+    elif args.command == "tiles-build":
+        build_pmtiles(args.layers)
+    elif args.command == "tiles-validate":
+        validate_pmtiles(args.layers)
 
 
 if __name__ == "__main__":

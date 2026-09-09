@@ -79,3 +79,36 @@ ingest-load:
 # Run the complete manual refresh: download, build, validate, and promote.
 ingest *ARGS:
     pipeline/.venv/bin/wherehouse-ingest run {{ARGS}}
+
+# Prepare lightweight Austin display geometry for vector tiling.
+tiles-prepare *LAYERS:
+    pipeline/.venv/bin/wherehouse-ingest tiles-prepare {{LAYERS}}
+
+# Build PMTiles. Requires tippecanoe 2.17 or newer.
+tiles-build *LAYERS:
+    pipeline/.venv/bin/wherehouse-ingest tiles-build {{LAYERS}}
+
+# Check PMTiles headers and output sizes.
+tiles-validate *LAYERS:
+    pipeline/.venv/bin/wherehouse-ingest tiles-validate {{LAYERS}}
+
+# Preview the Neon Object Storage changes without applying them.
+tiles-storage-plan:
+    bunx neon config plan
+
+# Provision the public Neon bucket and pull its branch-scoped credentials to .env.local.
+tiles-storage-deploy:
+    bunx neon deploy
+
+# Upload generated PMTiles to Neon Object Storage.
+tiles-upload *LAYERS:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    bucket="${NEON_STORAGE_BUCKET:-wherehouse-map-data}"
+    layers=({{LAYERS}})
+    if [ "${#layers[@]}" -eq 0 ]; then layers=(roads zoning flood buildings); fi
+    for layer in "${layers[@]}"; do
+        file="pipeline/data/processed/tiles/output/${layer}.pmtiles"
+        test -f "$file" || { echo "Missing $file; run 'just tiles-build' first."; exit 1; }
+        bunx neon buckets object put "$bucket/${layer}.pmtiles" --file "$file" --content-type application/vnd.pmtiles
+    done

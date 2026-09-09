@@ -39,7 +39,7 @@ bun create better-t-stack@latest wherehouse --frontend tanstack-start --backend 
 | ORM | Drizzle (app + auth tables only — §5.4) |
 | Deploy | Cloudflare Workers |
 | Map | MapLibre GL + deck.gl |
-| Tiles | PMTiles in Cloudflare R2, read client-side over HTTP range requests |
+| Tiles | PMTiles in Neon Object Storage, read client-side over HTTP range requests |
 | **Geo/ML sidecar** | **FastAPI + GeoPandas, Shapely, H3, scikit-learn, rasterio — on Render** |
 | Routing | OSRM, run offline only during precompute (§7) |
 
@@ -71,10 +71,10 @@ NEON POSTGRES + POSTGIS  ◄────  RENDER — FastAPI          (Megha)
   geo_dataset · h3_cell_fact     /heatmap /score /batch
   auth · app · later: reach      later: hotspots / catchment    │
                                                                │
-CLOUDFLARE R2 — *.pmtiles (roads, zoning, flood, buildings) ────┘
+NEON OBJECT STORAGE — *.pmtiles (roads, zoning, flood, buildings) ────┘
 
 OFFLINE, NEVER DEPLOYED                                   (Swapnil)
-  ingest → PostGIS  ·  OSRM Docker → cell_reach  ·  tippecanoe → R2
+  ingest → PostGIS  ·  OSRM Docker → cell_reach  ·  tippecanoe → Neon Object Storage
 ```
 
 ### 3.1 Contract between TypeScript and Python
@@ -87,7 +87,7 @@ The sidecar and ingestion data are real. Frontend work should target the agreed 
 
 Render's free tier spins down after ~15 minutes idle, cold-starting in ~50 seconds. That would destroy a live demo. Three mitigations, in order of importance:
 
-1. **Current Austin path — compact and cached.** The initial H3 heatmap is temporarily served by FastAPI so the scoring formulas remain in one language. FastAPI prepares one compact payload containing H3 indexes, eligibility, and six subscores for the 1,021 active cells; it omits geometry and detailed constraints and caches the prepared payload. Cloudflare may cache the user-independent result. If dataset size or cold starts become a problem, materialize the same contract into Neon or R2 without changing the UI.
+1. **Current Austin path — compact and cached.** The initial H3 heatmap is temporarily served by FastAPI so the scoring formulas remain in one language. FastAPI prepares one compact payload containing H3 indexes, eligibility, and six subscores for the 1,021 active cells; it omits geometry and detailed constraints and caches the prepared payload. Cloudflare may cache the user-independent result. If dataset size or cold starts become a problem, materialize the same contract into Neon without changing the UI.
 2. **Warmup on app load** — the root route fires a non-blocking `/health`. A request landing mid-spin-up shows a "warming up analysis engine" toast rather than looking broken.
 3. **Cloudflare Cron Trigger** pings `/health` every 10 minutes.
 
@@ -95,7 +95,7 @@ Render's free tier also caps at **512 MB RAM**. Caching the compact 1,021-row Au
 
 ### 3.3 Configuration
 
-The deployment needs `DATABASE_URL`, `BETTER_AUTH_SECRET`, Google OAuth credentials, `GEO_SERVICE_URL`, and `GEO_SERVICE_TOKEN`; Alchemy creates and binds Hyperdrive and sets the deployed `BETTER_AUTH_URL`. The sidecar needs the same Neon `DATABASE_URL`, the same `GEO_SERVICE_TOKEN`, and an `ALLOWED_ORIGINS` list containing the production Worker URL. `R2_PUBLIC_URL` is added when PMTiles are deployed.
+The deployment needs `DATABASE_URL`, `BETTER_AUTH_SECRET`, Google OAuth credentials, `GEO_SERVICE_URL`, and `GEO_SERVICE_TOKEN`; Alchemy creates and binds Hyperdrive and sets the deployed `BETTER_AUTH_URL`. The sidecar needs the same Neon `DATABASE_URL`, the same `GEO_SERVICE_TOKEN`, and an `ALLOWED_ORIGINS` list containing the production Worker URL. The Neon PMTiles public URLs are added when the map layers are deployed.
 
 The sidecar is a public URL, so the Worker authenticates every request with that shared bearer token — it is not a public API.
 
@@ -121,8 +121,8 @@ Teams/orgs/sharing (auth is login+signup only, for persisting saved sites) · pa
 
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
-| Render cold start delays the first heatmap or score request | High | High | §3.2 — cached compact payload, warmup state, and 10-minute keep-warm trigger; move the payload to Neon/R2 if this remains unreliable |
-| **Neon free tier is 0.5 GB**; raw OSM geometry exceeds it | High | High | §5.3 — DB holds analytics, R2 holds cartography |
+| Render cold start delays the first heatmap or score request | High | High | §3.2 — cached compact payload, warmup state, and 10-minute keep-warm trigger; materialize the payload in Neon if this remains unreliable |
+| Raw OSM geometry bloats Postgres and slows analytical queries | High | High | §5.3 — Postgres holds analytics; Neon Object Storage holds cartography |
 | Workers CPU limits on batch scoring | Med | Med | Runtime reads precomputed columns; heavy compute in sidecar; cap batches at 5,000 cells |
 | Drizzle can't model PostGIS polygons | Certain | Low | Designed around — §5.4 |
 | deck.gl breaks under TanStack Start SSR | High | Med | Client-only boundary + `React.lazy`. Do it on the first commit, not after debugging `window is not defined` |
@@ -159,12 +159,12 @@ The Austin municipal boundary is polyfilled at resolution 8. Every cell stores d
 
 Heatmaps, point scoring, batch scoring, and later hotspot detection read the active dataset's rows from this table. The heatmap returns weight-independent subscores so the browser can apply preset or custom weights without another server request.
 
-### 5.3 Storage discipline: analytics in Postgres, cartography in R2
+### 5.3 Storage discipline: analytics in Postgres, cartography in object storage
 
-Neon's free tier is 0.5 GB and raw Austin OSM geometry alone can exceed it. So:
+Raw Austin OSM geometry is bulky and should not compete with application queries in Postgres. So:
 
 - **Postgres currently holds analysis-ready H3 facts** plus dataset provenance and application/auth tables. Precomputed reachability will be added later.
-- **R2 holds display geometry** — `tippecanoe` builds vector tiles for roads, zoning, flood and buildings; `pmtiles` packs them into single files in a public bucket, read client-side via the `pmtiles://` protocol.
+- **Neon Object Storage holds display geometry** — `tippecanoe` builds vector tiles for roads, zoning, flood and buildings; `pmtiles` packs them into single files in a public-read bucket, read client-side via the `pmtiles://` protocol.
 - **Building footprints never enter Postgres.** They're aggregated to per-hex area at ingest and rendered only from tiles.
 
 This started as a cost workaround, but serving cartography from tiles rather than GeoJSON endpoints is what makes the map fast and deletes a whole class of backend endpoints. Keep it either way.
@@ -310,7 +310,7 @@ Owned by Vaidehi. TanStack Start + MapLibre GL + deck.gl, React state, Tailwind 
 └────────────────────────────────────────────────────────────────┘
 ```
 
-**Components.** *MapCanvas* — MapLibre basemap + PMTiles from R2; deck.gl overlays for the score heatmap, Gi* hot/cold with a diverging ramp, POI by category, zoning fill, flood hatch, stacked isochrone bands, and editable draw tools. *LayerPanel* — per-layer toggle and opacity, legend swaps with the active layer. *WeightEditor* — presets plus six sliders, renormalized live, client-side re-score on drag; **watching the heatmap shift as you drag is the best moment in the product, so prioritize making it smooth.** *ScorePanel* — score dial, grade, a **waterfall** of per-layer contributions measured from the metro mean (a plain bar chart is boring; a waterfall shows *why*), constraint checklist, catchment table, plain-English drivers and detractors. *CompareTray* — up to 4 pinned sites with aligned subscore rows and a radar overlay. *SavedSites* — appears when logged in. *Export* — one-page PDF plus GeoJSON of pinned sites; ten lines of code and the thing analysts will actually use. *ValidationPage* — ρ, P@10, separation, α, sensitivity, and the rubric. Showing your own error bars reads as confidence, not weakness.
+**Components.** *MapCanvas* — MapLibre basemap + PMTiles from Neon Object Storage; deck.gl overlays for the score heatmap, Gi* hot/cold with a diverging ramp, POI by category, zoning fill, flood hatch, stacked isochrone bands, and editable draw tools. *LayerPanel* — per-layer toggle and opacity, legend swaps with the active layer. *WeightEditor* — presets plus six sliders, renormalized live, client-side re-score on drag; **watching the heatmap shift as you drag is the best moment in the product, so prioritize making it smooth.** *ScorePanel* — score dial, grade, a **waterfall** of per-layer contributions measured from the metro mean (a plain bar chart is boring; a waterfall shows *why*), constraint checklist, catchment table, plain-English drivers and detractors. *CompareTray* — up to 4 pinned sites with aligned subscore rows and a radar overlay. *SavedSites* — appears when logged in. *Export* — one-page PDF plus GeoJSON of pinned sites; ten lines of code and the thing analysts will actually use. *ValidationPage* — ρ, P@10, separation, α, sensitivity, and the rubric. Showing your own error bars reads as confidence, not weakness.
 
 **Performance targets:** initial map load < 3 s · layer toggle < 100 ms · weight slider recolor < 250 ms (no network) · click → score < 600 ms warm · isochrone render < 500 ms.
 
@@ -338,7 +338,7 @@ These phases organize the work; they are not gates. Teammates may pull forward a
 
 ### Phase 1 — Data foundation
 
-**Swapnil** — six-source ingestion, validation, DDL, GiST indexing, the 1,021-cell resolution-8 grid, and atomic Neon activation are complete; tippecanoe → PMTiles → R2 remains.
+**Swapnil** — six-source ingestion, validation, DDL, GiST indexing, the 1,021-cell resolution-8 grid, and atomic Neon activation are complete; tippecanoe → PMTiles → Neon Object Storage remains.
 **Megha** — move all formula scorers to the real active Neon dataset; retain percentile normalization, hard constraints, and preset tuning in Python.
 **Vaidehi** — consume the real H3 heatmap, then add PMTiles layers and drawing tools as their data becomes available.
 
@@ -421,7 +421,7 @@ Only after §12 is green, in priority order:
 | Python · GeoPandas · Shapely · H3 · sklearn | `apps/fastapi`, `pipeline/` | Megha / Swapnil |
 | FastAPI | `apps/fastapi` | Megha |
 | PostGIS | §5.4 — Neon + PostGIS, raw-SQL migrations | Swapnil |
-| Vector tiles + MapLibre | §5.3 — tippecanoe → PMTiles → R2 | Swapnil / Vaidehi |
+| Vector tiles + MapLibre | §5.3 — tippecanoe → PMTiles → Neon Object Storage | Swapnil / Vaidehi |
 | React frontend + map library | §9 — TanStack Start | Vaidehi |
 
 Every line in the brief maps to a deliverable and an owner. Nothing is unassigned.
