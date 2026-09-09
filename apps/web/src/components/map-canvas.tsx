@@ -17,7 +17,7 @@ import {
   type Weights,
 } from "@/lib/cells";
 import {
-  BASEMAP_SURFACE_RGB,
+  HEX_SEAM_RGBA,
   SCORE_BINS,
   binIndexForScore,
   colorForScore,
@@ -267,10 +267,12 @@ export default function MapCanvas() {
               data: visibleCells,
               getHexagon: (d) => d.h3Index,
               getFillColor: (d) => colorForScore(compositeScore(d.subscores, weights)),
-              // Hex borders in the basemap color, so the seam between cells
-              // reads as basemap showing through rather than a drawn grid.
+              // A soft seam rather than a border — see `HEX_SEAM_RGBA`. Kept
+              // at a 1px minimum: thinner lands on sub-pixel widths, where
+              // antialiasing thins the seam again on top of the alpha and it
+              // breaks up unevenly across zoom levels.
               stroked: true,
-              getLineColor: BASEMAP_SURFACE_RGB,
+              getLineColor: HEX_SEAM_RGBA,
               lineWidthMinPixels: 1,
               filled: true,
               extruded: false,

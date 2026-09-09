@@ -8,9 +8,24 @@
  * lightness and adjacent step separation.
  */
 
-/** CARTO dark-matter background. Hex borders use this so the basemap shows through. */
+/** CARTO dark-matter background. The hex seam is drawn from this. */
 export const BASEMAP_SURFACE = "#0e0e0e";
 export const BASEMAP_SURFACE_RGB: [number, number, number] = [14, 14, 14];
+
+/**
+ * The line between two hexes.
+ *
+ * The basemap color, but at low alpha rather than opaque. At full strength it
+ * drew a hard 1px gutter around every cell, and the grid read as separate
+ * tiles floating over the map instead of one surface — the fills never
+ * appeared to touch. Softened, the seam still marks where one cell ends,
+ * which matters because scoring and selection are per-cell, but neighbours in
+ * the same band now blend into a continuous area.
+ *
+ * The layer's own opacity multiplies this, so the seam fades with the ramp
+ * instead of surviving as a grid over a dimmed heatmap.
+ */
+export const HEX_SEAM_RGBA: [number, number, number, number] = [...BASEMAP_SURFACE_RGB, 70];
 
 export interface ScoreBin {
   /** Inclusive lower edge. */
