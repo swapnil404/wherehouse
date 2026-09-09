@@ -142,13 +142,12 @@ class HeatmapContractTests(unittest.TestCase):
         self.assertTrue(by_id["dominant_zone_class"]["pass"])
         self.assertTrue(all(c["pass"] for c in by_id.values()))
 
-    def test_ev_competition_avoids_industrial_rivals(self) -> None:
-        isolated = self.frame.iloc[0]  # competitor_count_2km == 0
-        crowded = self.frame.iloc[1]  # competitor_count_2km == 4
-        self.assertGreater(
-            compute_subscores(isolated, "ev")["poi"],
-            compute_subscores(crowded, "ev")["poi"],
-        )
+    def test_ev_poi_ignores_competitor_counts(self) -> None:
+        base = compute_subscores(self.frame.iloc[1], "ev")["poi"]
+        for rival_count in (0, 4, 999):
+            row = self.frame.iloc[1].copy()
+            row["competitor_count_2km"] = rival_count
+            self.assertEqual(compute_subscores(row, "ev")["poi"], base)
 
 
 if __name__ == "__main__":

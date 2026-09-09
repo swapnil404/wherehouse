@@ -16,8 +16,8 @@ PRESET_WEIGHTS = {
         "zoning": 0.14, "flood": 0.10, "aqi": 0.06,
     },
     # EV charging: corridor visibility (transport) and dwell-time amenities
-    # (poi: food/retail while charging) dominate; demographics captures
-    # passing traffic and local adoption; zoning/flood are secondary.
+    # (poi: food/retail while charging) dominate; demographics reflects
+    # the nearby resident profile; zoning/flood are secondary.
     # Initial values — Megha to tune against the validation set (spec 8.6).
     "ev": {
         "demographics": 0.20, "transport": 0.30, "poi": 0.22,
@@ -34,6 +34,9 @@ PRESET_CONFIG = {
         "competitor_width": 3,
         "complementary_column": "complementary_count_5km_percentile",
         "anchor_column": "anchor_count_5km_percentile",
+        "poi_competition_weight": 0.45,
+        "poi_complementary_weight": 0.30,
+        "poi_anchor_weight": 0.25,
         "zone_scores": {"industrial": 95, "commercial": 55, "agricultural": 35, "residential": 15},
         "zone_bonus_column": "industrial_area_pct", "zone_bonus_scale": 0.50,
     },
@@ -44,6 +47,9 @@ PRESET_CONFIG = {
         "competitor_width": 2,
         "complementary_column": "complementary_count_1km_percentile",
         "anchor_column": "anchor_count_2km_percentile",
+        "poi_competition_weight": 0.45,
+        "poi_complementary_weight": 0.30,
+        "poi_anchor_weight": 0.25,
         "zone_scores": {"industrial": 25, "commercial": 95, "agricultural": 15, "residential": 45},
         "zone_bonus_column": "commercial_area_pct", "zone_bonus_scale": 0.25,
     },
@@ -52,19 +58,20 @@ PRESET_CONFIG = {
     # - highway scale 5 km: corridor visibility matters, tighter than
     #   warehouse (10 km) but looser than retail (3 km).
     # - competition: competitor_count_2km counts warehouse/industrial
-    #   competitors from the ingestion pipeline — NOT charging stations.
-    #   We have no charger-location data, so the term peaks at 0 nearby
-    #   competitors (avoid industrial friction), and must never be
-    #   presented as EV charger coverage.
+    #   competitors from the ingestion pipeline — NOT charging stations —
+    #   and has no meaningful relationship to charger suitability, so the
+    #   EV poi blend uses only real available fields: 55% complementary
+    #   (amenities worth a charging stop) and 45% anchor footfall.
     # - complementary uses the 2 km ring: amenities worth a charging stop.
     # - commercial frontage preferred; industrial acceptable for depots.
     "ev": {
         "income_target": 85_000, "income_width": 40_000,
         "age_target": 38, "age_width": 18, "highway_scale_km": 5,
-        "competitor_column": "competitor_count_2km", "competitor_target": 0,
-        "competitor_width": 2,
         "complementary_column": "complementary_count_2km_percentile",
         "anchor_column": "anchor_count_2km_percentile",
+        "poi_competition_weight": 0.0,
+        "poi_complementary_weight": 0.55,
+        "poi_anchor_weight": 0.45,
         "zone_scores": {"industrial": 60, "commercial": 95, "agricultural": 15, "residential": 40},
         "zone_bonus_column": "commercial_area_pct", "zone_bonus_scale": 0.25,
     },
@@ -107,15 +114,18 @@ def compute_subscores(row: Any, preset: str = "warehouse") -> Dict[str, float]:
     highway_access = np.exp(-float(row["highway_distance_km"]) / config["highway_scale_km"])
     transport = 100 * (0.40 * row["road_density_percentile"] + 0.60 * highway_access)
 
-    competitor_count = float(row[config["competitor_column"]])
-    competition = np.exp(
-        -((competitor_count - config["competitor_target"]) ** 2)
-        / (2 * config["competitor_width"] ** 2)
-    )
+    competition_weight = float(config.get("poi_competition_weight", 0.45))
+    competition = 0.0
+    if competition_weight and config.get("competitor_column"):
+        competitor_count = float(row[config["competitor_column"]])
+        competition = np.exp(
+            -((competitor_count - config["competitor_target"]) ** 2)
+            / (2 * config["competitor_width"] ** 2)
+        )
     poi = 100 * (
-        0.45 * competition
-        + 0.30 * row[config["complementary_column"]]
-        + 0.25 * row[config["anchor_column"]]
+        competition_weight * competition
+        + float(config.get("poi_complementary_weight", 0.30)) * row[config["complementary_column"]]
+        + float(config.get("poi_anchor_weight", 0.25)) * row[config["anchor_column"]]
     )
 
     zone_class = str(row["dominant_zone_class"]).lower()
