@@ -1,7 +1,34 @@
-import { useMutation } from "@tanstack/react-query";
+import { H3HexagonLayer } from "@deck.gl/geo-layers";
+import { MapboxOverlay } from "@deck.gl/mapbox";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import {
+  CircleAlertIcon,
+  LoaderCircleIcon,
+  TriangleAlertIcon,
+} from "lucide-react";
 import maplibregl from "maplibre-gl";
-import { useEffect, useRef } from "react";
+import { Protocol } from "pmtiles";
+import { useEffect, useMemo, useRef, useState } from "react";
 
+import ScorePanel from "./score-panel";
+import {
+  PRESET_LABELS,
+  SUBSCORE_KEYS,
+  SUBSCORE_LABELS,
+  compositeScore,
+  type HeatmapCell,
+  type PresetName,
+  type Weights,
+} from "@/lib/cells";
+import {
+  HEX_SEAM_RGBA,
+  SCORE_BINS,
+  binIndexForScore,
+  colorForScore,
+} from "@/lib/heatmap-palette";
+import { computeGridAnalytics } from "@/lib/score-analytics";
+import { PMTILES_BASE_URL, TILE_LAYERS, archiveUrl } from "@/lib/tile-layers";
+import { useMapStore } from "@/stores/map-store";
 import { useTRPC } from "@/utils/trpc";
 
 /**
@@ -13,20 +40,123 @@ import { useTRPC } from "@/utils/trpc";
 const AUSTIN = { lng: -97.7431, lat: 30.2672 };
 
 /** CARTO dark matter — free, no API key, OSM-attributed. */
-const BASEMAP_STYLE = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
+const BASEMAP_STYLE =
+  "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
+
+const EMPTY_CELLS: HeatmapCell[] = [];
+
+/**
+ * `addProtocol` registers globally on maplibre, not per map, so this runs once
+ * per page rather than once per mount — re-registering on a remount would
+ * discard the archive header/directory cache the protocol keeps, and every
+ * visible tile would re-fetch.
+ *
+ * `metadata: true` costs one extra range request per archive and in exchange
+ * populates the attribution control from what Tippecanoe baked in. Attribution
+ * for OSM and the City of Austin data is not optional, so that trade is
+ * already decided.
+ */
+let pmtilesProtocolRegistered = false;
+function registerPMTilesProtocol() {
+  if (pmtilesProtocolRegistered) return;
+  maplibregl.addProtocol("pmtiles", new Protocol({ metadata: true }).tile);
+  pmtilesProtocolRegistered = true;
+}
+
+/**
+ * Where deck's hexes get inserted into the basemap's layer stack.
+ *
+ * `null` means the style is not ready yet. `{ beforeId: undefined }` means it
+ * is ready but nothing was found to anchor against, so deck draws on top —
+ * which is the old overlaid behaviour and a safe fallback rather than a crash.
+ */
+type DeckAnchor = { beforeId: string | undefined } | null;
 
 export default function MapCanvas() {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
-  const markerRef = useRef<maplibregl.Marker | null>(null);
+  const overlayRef = useRef<MapboxOverlay | null>(null);
+  const [deckAnchor, setDeckAnchor] = useState<DeckAnchor>(null);
+
   const trpc = useTRPC();
+  const preset = useMapStore((s) => s.preset);
+  const mapLayers = useMapStore((s) => s.layers);
+  const heatmap = mapLayers.heatmap;
+  const eligibleOnly = useMapStore((s) => s.eligibleOnly);
+  const setHeatmapStats = useMapStore((s) => s.setHeatmapStats);
+  const setPresets = useMapStore((s) => s.setPresets);
+  const customWeights = useMapStore((s) => s.customWeights);
+
   const scorePoint = useMutation(trpc.geo.score.mutationOptions());
   const scorePointRef = useRef(scorePoint.mutate);
-
+  const selectedPointRef = useRef<{ lat: number; lon: number } | null>(null);
   scorePointRef.current = scorePoint.mutate;
+
+  // Weight-independent subscores: the grid is fetched once per preset and the
+  // composite is computed here, so a preset switch is a recolor, not a refetch
+  // of scores.
+  const cellsQuery = useQuery({
+    ...trpc.geo.heatmap.queryOptions({ preset }),
+    staleTime: Infinity,
+  });
+  const presetsQuery = useQuery({
+    ...trpc.geo.presets.queryOptions(),
+    staleTime: Infinity,
+  });
+
+  const cells = cellsQuery.data?.cells ?? EMPTY_CELLS;
+  const presetWeights = (presetsQuery.data?.[preset] ?? null) as Weights | null;
+
+  // Slider edits win over the preset. This single value drives the fill color,
+  // the tooltip, the legend counts, the waterfall and the click-score request,
+  // so the map and the panel can never disagree about what weights are active.
+  const weights = customWeights ?? presetWeights ?? ({} as Weights);
+  const weightsReady = Object.keys(weights).length > 0;
+
+  // Publish the preset payload for the rail. Keys are narrowed against the
+  // known labels so an unrecognized preset never becomes a button the client
+  // cannot render.
+  useEffect(() => {
+    if (!presetsQuery.data) return;
+    const served: Partial<Record<PresetName, Weights>> = {};
+    for (const [name, value] of Object.entries(presetsQuery.data)) {
+      if (name in PRESET_LABELS) served[name as PresetName] = value as Weights;
+    }
+    if (Object.keys(served).length > 0) setPresets(served);
+  }, [presetsQuery.data, setPresets]);
+
+  const visibleCells = useMemo(
+    () => (eligibleOnly ? cells.filter((cell) => cell.eligible) : cells),
+    [cells, eligibleOnly],
+  );
+
+  const selectedData = useMemo(() => {
+    if (!scorePoint.data) return null;
+    return {
+      ...scorePoint.data,
+      score: compositeScore(scorePoint.data.subscores, weights),
+    };
+  }, [scorePoint.data, weights]);
+  const selectedH3 = selectedData?.h3_index ?? null;
+
+  // Subscores and hard constraints vary by preset, so refresh the selected
+  // cell when the use case changes. Weight-only edits stay local: the selected
+  // composite above and every heatmap cell use the same weighted average.
+  useEffect(() => {
+    const point = selectedPointRef.current;
+    if (!point) return;
+    scorePointRef.current({ point, preset });
+  }, [preset]);
+
+  // The tooltip closure is built once with the overlay, so it reads the active
+  // preset's weights through a ref rather than capturing a stale value.
+  const weightsRef = useRef<Weights>(weights);
+  weightsRef.current = weights;
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
+
+    registerPMTilesProtocol();
 
     const map = new maplibregl.Map({
       container: containerRef.current,
@@ -36,33 +166,268 @@ export default function MapCanvas() {
       attributionControl: { compact: true },
     });
 
-    map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
-    map.addControl(new maplibregl.ScaleControl({ unit: "metric" }), "bottom-left");
+    map.addControl(
+      new maplibregl.NavigationControl({ visualizePitch: true }),
+      "top-right",
+    );
+    map.addControl(
+      new maplibregl.ScaleControl({ unit: "metric" }),
+      "bottom-left",
+    );
     map.getCanvas().style.cursor = "crosshair";
-    map.on("click", ({ lngLat }) => {
-      scorePointRef.current({
-        point: { lat: lngLat.lat, lon: lngLat.lng },
+
+    map.on("load", () => {
+      // The basemap's first symbol layer is where its labels begin. Everything
+      // we add goes below it, so street and place names stay on top of both
+      // the overlays and the hexes. Found by scanning rather than hardcoding
+      // an id, so a CARTO style revision cannot silently bury the labels.
+      const labelStart = map
+        .getStyle()
+        .layers.find((l) => l.type === "symbol")?.id;
+
+      if (PMTILES_BASE_URL) {
+        for (const layer of TILE_LAYERS) {
+          map.addSource(layer.sourceId, {
+            type: "vector",
+            url: archiveUrl(layer),
+          });
+          const state = useMapStore.getState().layers[layer.id];
+          const initialStyle = {
+            ...layer.style,
+            layout: {
+              ...layer.style.layout,
+              visibility: state.visible ? "visible" : "none",
+            },
+            paint: {
+              ...layer.style.paint,
+              [layer.opacityProperty]: state.opacity,
+            },
+          } as maplibregl.LayerSpecification;
+          // Each insert lands immediately below `labelStart`, so the layers
+          // stack in array order: zoning at the bottom, roads on top.
+          map.addLayer(initialStyle, labelStart);
+        }
+      }
+
+      // Hexes go below the first overlay, which puts the stack, bottom to top:
+      // basemap, hexes, overlays, labels. With no tiles configured there is no
+      // overlay to sit under, so they anchor to the label boundary instead —
+      // anchoring to a layer that was never added would throw in `addLayer`.
+      setDeckAnchor({
+        beforeId: PMTILES_BASE_URL ? TILE_LAYERS[0].style.id : labelStart,
       });
     });
 
+    map.on("click", ({ lngLat }) => {
+      const { preset: activePreset, customWeights: edits } =
+        useMapStore.getState();
+      const point = { lat: lngLat.lat, lon: lngLat.lng };
+      selectedPointRef.current = point;
+      scorePointRef.current({
+        point,
+        preset: activePreset,
+        // Send slider edits so the panel's score matches the hex the user
+        // clicked. Omitted when unedited, letting the server use the preset's
+        // own weights as the source of truth.
+        weights: edits ?? undefined,
+      });
+    });
+
+    // Interleaved: deck shares the basemap's GL context and its layers live in
+    // the same stack, which is the only way the PMTiles overlays and the
+    // basemap's labels can draw *above* the hexes. The cost is a dependency on
+    // the basemap's layer ids, kept to the single lookup in the `load` handler
+    // above and degraded to "draw on top" rather than a throw if it fails.
+    const overlay = new MapboxOverlay({
+      interleaved: true,
+      layers: [],
+      getTooltip: ({ object }) => {
+        const cell = object as HeatmapCell | undefined;
+        if (!cell) return null;
+
+        const score = compositeScore(cell.subscores, weightsRef.current);
+        const rows = SUBSCORE_KEYS.map(
+          (key) =>
+            `<div style="display:flex;justify-content:space-between;gap:12px">
+               <span style="color:#898781">${SUBSCORE_LABELS[key]}</span>
+               <span style="font-variant-numeric:tabular-nums">${cell.subscores[key].toFixed(0)}</span>
+             </div>`,
+        ).join("");
+
+        return {
+          html: `
+            <div style="min-width:190px">
+              <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:6px">
+                <span style="font-size:18px;font-weight:600;font-variant-numeric:tabular-nums">
+                  ${score == null ? "—" : score.toFixed(1)}
+                </span>
+                <span style="font-size:11px;color:${cell.eligible ? "#0ca30c" : "#d03b3b"}">
+                  ${cell.eligible ? "Eligible" : "Constraints failed"}
+                </span>
+              </div>
+              ${rows}
+              <div style="margin-top:6px;font-size:10px;color:#898781">${cell.h3Index}</div>
+            </div>`,
+          style: {
+            backgroundColor: "#1a1a19",
+            color: "#ffffff",
+            border: "1px solid rgba(255,255,255,0.10)",
+            borderRadius: "8px",
+            padding: "10px 12px",
+            fontSize: "12px",
+            fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif",
+            boxShadow: "0 8px 24px rgba(0,0,0,0.45)",
+          },
+        };
+      },
+    });
+    map.addControl(overlay as unknown as maplibregl.IControl);
+
     mapRef.current = map;
+    overlayRef.current = overlay;
 
     return () => {
-      markerRef.current?.remove();
-      markerRef.current = null;
+      overlayRef.current = null;
       map.remove();
       mapRef.current = null;
     };
   }, []);
 
-  useEffect(() => {
-    if (!scorePoint.data || !mapRef.current) return;
+  const layers = useMemo(() => {
+    // Interleaved layers are inserted with `map.addLayer(group, beforeId)`, so
+    // handing deck a `beforeId` before the style has that layer would throw.
+    // Nothing renders until the `load` handler has published the anchor.
+    if (!deckAnchor) return [];
 
-    markerRef.current ??= new maplibregl.Marker({ color: "#22c55e" });
-    markerRef.current
-      .setLngLat([scorePoint.data.lon, scorePoint.data.lat])
-      .addTo(mapRef.current);
-  }, [scorePoint.data]);
+    // `@deck.gl/mapbox` reads `beforeId` off a layer's props in interleaved
+    // mode, but it is not part of deck's core layer props and the package does
+    // not export the type that adds it. Spread rather than written inline:
+    // that is what keeps TypeScript from rejecting it as an excess property,
+    // without reaching for `as any` on the whole layer.
+    const placement = { beforeId: deckAnchor.beforeId };
+
+    return [
+      // The heatmap fill is conditional, but the selection ring below is not:
+      // hiding the layer should not also discard the user's selection.
+      ...(heatmap.visible && weightsReady
+        ? [
+            new H3HexagonLayer<HeatmapCell>({
+              ...placement,
+              id: "score-heatmap",
+              data: visibleCells,
+              getHexagon: (d) => d.h3Index,
+              getFillColor: (d) =>
+                colorForScore(compositeScore(d.subscores, weights)),
+              // A soft seam rather than a border — see `HEX_SEAM_RGBA`. Kept
+              // at a 1px minimum: thinner lands on sub-pixel widths, where
+              // antialiasing thins the seam again on top of the alpha and it
+              // breaks up unevenly across zoom levels.
+              stroked: true,
+              getLineColor: HEX_SEAM_RGBA,
+              lineWidthMinPixels: 1,
+              filled: true,
+              extruded: false,
+              opacity: heatmap.opacity,
+              pickable: true,
+              autoHighlight: true,
+              highlightColor: [255, 255, 255, 40],
+              updateTriggers: {
+                getFillColor: [weights],
+              },
+            }),
+          ]
+        : []),
+      // Outline the scored cell — the only selection cue, so it carries the
+      // weight a pin used to. A pin marked a coordinate, which was misleading:
+      // scoring snaps to the containing cell, so the hexagon is the honest
+      // unit. Drawn last and unfilled, so the score color underneath stays
+      // readable through the ring.
+      ...(selectedH3
+        ? [
+            new H3HexagonLayer<{ h3Index: string }>({
+              ...placement,
+              id: "selected-cell",
+              data: [{ h3Index: selectedH3 }],
+              getHexagon: (d) => d.h3Index,
+              filled: false,
+              stroked: true,
+              getLineColor: [255, 255, 255, 255],
+              lineWidthMinPixels: 3,
+              extruded: false,
+              pickable: false,
+              // Independent of the heatmap's opacity slider: dialling the fill
+              // down to 20% should not also fade the selection ring.
+              opacity: 1,
+            }),
+          ]
+        : []),
+    ];
+  }, [
+    deckAnchor,
+    heatmap.visible,
+    heatmap.opacity,
+    visibleCells,
+    weights,
+    weightsReady,
+    selectedH3,
+  ]);
+
+  useEffect(() => {
+    overlayRef.current?.setProps({ layers });
+  }, [layers]);
+
+  // Push the rail's toggles and sliders onto the style. Runs off `deckAnchor`
+  // rather than a mount-time flag because that is the signal the `load`
+  // handler finished adding these layers.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !deckAnchor || !PMTILES_BASE_URL) return;
+
+    for (const layer of TILE_LAYERS) {
+      const state = mapLayers[layer.id];
+      map.setLayoutProperty(
+        layer.style.id,
+        "visibility",
+        state.visible ? "visible" : "none",
+      );
+      map.setPaintProperty(
+        layer.style.id,
+        layer.opacityProperty,
+        state.opacity,
+      );
+    }
+  }, [deckAnchor, mapLayers]);
+
+  // Publish band counts for the rail's legend. Derived from every cell, not
+  // just the visible ones, so the distribution does not shift when the
+  // eligibility filter is on.
+  useEffect(() => {
+    if (!cellsQuery.data || !weightsReady) {
+      setHeatmapStats(null);
+      return;
+    }
+
+    const counts = new Array<number>(SCORE_BINS.length).fill(0);
+    let eligible = 0;
+    for (const cell of cellsQuery.data.cells) {
+      const index = binIndexForScore(compositeScore(cell.subscores, weights));
+      if (index >= 0) counts[index] += 1;
+      if (cell.eligible) eligible += 1;
+    }
+
+    setHeatmapStats({
+      counts,
+      total: cellsQuery.data.cells.length,
+      eligible,
+      datasetId: cellsQuery.data.datasetId,
+      h3Resolution: cellsQuery.data.h3Resolution,
+      analytics: computeGridAnalytics(cellsQuery.data.cells, weights),
+    });
+  }, [cellsQuery.data, weights, weightsReady, setHeatmapStats]);
+
+  const stats = useMapStore((s) => s.heatmapStats);
+  const loading = cellsQuery.isPending || presetsQuery.isPending;
+  const failed = cellsQuery.error ?? presetsQuery.error;
 
   // Sized with h-full/w-full rather than `absolute inset-0`: MapLibre adds
   // `.maplibregl-map` to this element, and that rule sets `position: relative`.
@@ -72,53 +437,38 @@ export default function MapCanvas() {
     <div className="relative h-full w-full">
       <div ref={containerRef} className="h-full w-full" />
 
-      <aside className="absolute top-4 right-16 w-80 max-w-[calc(100%-5rem)] rounded-lg border border-white/10 bg-neutral-950/90 p-4 text-neutral-100 shadow-xl backdrop-blur">
-        {scorePoint.isPending ? (
-          <p className="text-sm text-neutral-300">Scoring this location…</p>
-        ) : scorePoint.error ? (
-          <div>
-            <p className="font-medium text-red-300">Location unavailable</p>
-            <p className="mt-1 text-sm text-neutral-300">{scorePoint.error.message}</p>
-          </div>
-        ) : scorePoint.data ? (
-          <div>
-            <div className="flex items-end justify-between gap-3">
-              <div>
-                <p className="text-xs tracking-wide text-neutral-400 uppercase">Site score</p>
-                <p className="text-3xl font-semibold">{scorePoint.data.score}</p>
-              </div>
-              <span className={scorePoint.data.eligible
-                ? "rounded-full bg-green-500/15 px-2 py-1 text-xs text-green-300"
-                : "rounded-full bg-amber-500/15 px-2 py-1 text-xs text-amber-300"}
-              >
-                {scorePoint.data.eligible ? "Eligible" : "Constraints failed"}
-              </span>
-            </div>
+      {/* Bottom-centred, clear of the top cluster (preset picker, score panel)
+          and of MapLibre's own controls at bottom-left and bottom-right. */}
+      {heatmap.visible ? (
+        <div className="pointer-events-none absolute inset-x-0 bottom-8 flex justify-center">
+          {loading ? (
+            <p className="flex items-center gap-1.5 rounded-full border border-border bg-card/90 px-3 py-1.5 text-xs text-muted-foreground backdrop-blur">
+              <LoaderCircleIcon className="size-3.5 shrink-0 animate-spin" />
+              Loading {PRESET_LABELS[preset]} grid…
+            </p>
+          ) : failed ? (
+            <p className="flex items-center gap-1.5 rounded-full border border-destructive/40 bg-card/90 px-3 py-1.5 text-xs text-destructive backdrop-blur">
+              <TriangleAlertIcon className="size-3.5 shrink-0" />
+              Grid unavailable — {failed.message}
+            </p>
+          ) : visibleCells.length === 0 ? (
+            <p className="flex items-center gap-1.5 rounded-full border border-border bg-card/90 px-3 py-1.5 text-xs text-muted-foreground backdrop-blur">
+              <CircleAlertIcon className="size-3.5 shrink-0" />
+              {eligibleOnly
+                ? "No cells pass every constraint under this preset"
+                : "No scored cells to draw"}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
-            <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
-              {Object.entries(scorePoint.data.subscores).map(([name, score]) => (
-                <div key={name} className="rounded bg-white/5 px-2 py-1.5">
-                  <span className="capitalize text-neutral-400">{name}</span>
-                  <span className="float-right font-medium">{score}</span>
-                </div>
-              ))}
-            </div>
-
-            <div className="mt-4 space-y-2">
-              {scorePoint.data.constraints.map((constraint) => (
-                <div key={constraint.id} className="flex gap-2 text-xs">
-                  <span className={constraint.pass ? "text-green-400" : "text-red-400"}>
-                    {constraint.pass ? "Pass" : "Fail"}
-                  </span>
-                  <span className="text-neutral-300">{constraint.label}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : (
-          <p className="text-sm text-neutral-300">Click anywhere in Austin to score that location.</p>
-        )}
-      </aside>
+      <ScorePanel
+        isPending={scorePoint.isPending}
+        error={scorePoint.error}
+        data={selectedData}
+        analytics={stats?.analytics ?? null}
+        weights={weightsReady ? weights : null}
+      />
     </div>
   );
 }

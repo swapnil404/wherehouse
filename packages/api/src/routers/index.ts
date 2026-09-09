@@ -8,6 +8,7 @@ import {
   getPresets,
   scoreBatch,
   scorePoint,
+  type PresetName,
 } from "../geo/client";
 
 const pointSchema = z.object({
@@ -16,7 +17,19 @@ const pointSchema = z.object({
 });
 
 const weightsSchema = z.record(z.string(), z.number().finite().nonnegative());
-const presetSchema = z.enum(["warehouse", "retail"]);
+
+export const PRESET_NAMES = ["warehouse", "retail", "ev"] as const satisfies readonly PresetName[];
+
+/**
+ * Guard against the list falling behind the API. Assigning a `PresetName` to
+ * the tuple's union fails to compile if the Python side gains a preset that is
+ * not listed above — which is how `ev` previously ended up unreachable.
+ */
+const _assertPresetsExhaustive: (typeof PRESET_NAMES)[number] =
+  null as unknown as PresetName;
+void _assertPresetsExhaustive;
+
+const presetSchema = z.enum(PRESET_NAMES);
 
 function mapGeoError(error: unknown): never {
   if (!(error instanceof GeoServiceError)) {
