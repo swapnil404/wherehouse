@@ -16,7 +16,8 @@
             "default": "warehouse",
             "enum": [
               "warehouse",
-              "retail"
+              "retail",
+              "ev"
             ],
             "title": "Preset",
             "type": "string"
@@ -156,7 +157,8 @@
           "preset": {
             "enum": [
               "warehouse",
-              "retail"
+              "retail",
+              "ev"
             ],
             "title": "Preset",
             "type": "string"
@@ -202,7 +204,8 @@
             "default": "warehouse",
             "enum": [
               "warehouse",
-              "retail"
+              "retail",
+              "ev"
             ],
             "title": "Preset",
             "type": "string"
@@ -404,7 +407,8 @@
               "default": "warehouse",
               "enum": [
                 "warehouse",
-                "retail"
+                "retail",
+                "ev"
               ],
               "title": "Preset",
               "type": "string"

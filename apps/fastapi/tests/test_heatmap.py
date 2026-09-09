@@ -4,7 +4,13 @@ import pandas as pd
 
 from main import _build_heatmap_cells
 from schemas import HeatmapResponse
-from scoring import PRESET_WEIGHTS, composite_score, compute_subscores, prepare_scoring_data
+from scoring import (
+    PRESET_WEIGHTS,
+    composite_score,
+    compute_subscores,
+    evaluate_constraints,
+    prepare_scoring_data,
+)
 
 
 def sample_frame() -> pd.DataFrame:
@@ -20,6 +26,8 @@ def sample_frame() -> pd.DataFrame:
             "competitor_count_5km": 1,
             "complementary_count_1km": 1,
             "complementary_count_5km": 2,
+            "complementary_count_2km": 1,
+            "competitor_count_2km": 0,
             "anchor_count_2km": 1,
             "anchor_count_5km": 2,
             "dominant_zone_class": "industrial",
@@ -40,6 +48,8 @@ def sample_frame() -> pd.DataFrame:
             "competitor_count_5km": 8,
             "complementary_count_1km": 8,
             "complementary_count_5km": 10,
+            "complementary_count_2km": 9,
+            "competitor_count_2km": 4,
             "anchor_count_2km": 5,
             "anchor_count_5km": 6,
             "dominant_zone_class": "commercial",
@@ -98,6 +108,34 @@ class HeatmapContractTests(unittest.TestCase):
             2,
         )
         self.assertEqual(composite_score(subscores, weights), expected)
+
+    def test_ev_weights_cover_six_layers_and_sum_to_one(self) -> None:
+        weights = PRESET_WEIGHTS["ev"]
+        self.assertEqual(
+            set(weights),
+            {"demographics", "transport", "poi", "zoning", "flood", "aqi"},
+        )
+        self.assertAlmostEqual(sum(weights.values()), 1.0)
+
+    def test_ev_prefers_commercial_frontage_over_industrial(self) -> None:
+        industrial = self.frame.iloc[0]
+        commercial = self.frame.iloc[1]
+        self.assertGreater(
+            compute_subscores(commercial, "ev")["zoning"],
+            compute_subscores(industrial, "ev")["zoning"],
+        )
+
+    def test_ev_constraints_use_corridor_rules(self) -> None:
+        commercial = self.frame.iloc[1]
+        by_id = {c["id"]: c for c in evaluate_constraints(commercial, "ev")}
+        self.assertEqual(
+            set(by_id),
+            {"in_sfha", "dominant_zone_class", "highway_distance_km", "commercial_area_pct"},
+        )
+        self.assertEqual(by_id["highway_distance_km"]["required"], 5.0)
+        self.assertEqual(by_id["commercial_area_pct"]["required"], 10.0)
+        self.assertIn("industrial", by_id["dominant_zone_class"]["required"])
+        self.assertNotIn("residential", by_id["dominant_zone_class"]["required"])
 
 
 if __name__ == "__main__":

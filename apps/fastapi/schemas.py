@@ -4,7 +4,7 @@ from typing import Annotated, Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-PresetName = Literal["warehouse", "retail"]
+PresetName = Literal["warehouse", "retail", "ev"]
 WeightName = Literal["demographics", "transport", "poi", "zoning", "flood", "aqi"]
 WeightValue = Annotated[float, Field(ge=0, allow_inf_nan=False)]
 Weights = Dict[WeightName, WeightValue]
