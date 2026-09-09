@@ -9,11 +9,12 @@ from pathlib import Path
 import geopandas as gpd
 import h3
 import numpy as np
+import osmium
 import pandas as pd
 import pyogrio
 import rasterio
 from rasterio.transform import from_origin
-from shapely.geometry import Polygon
+from shapely.geometry import LineString, Polygon
 
 from .config import (
     ACS_VARIABLES,
@@ -130,11 +131,44 @@ def _read_osm_layer(layer: str, boundary: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     return gpd.clip(data.to_crs(WGS84), boundary)
 
 
+def _read_osm_roads(boundary: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """Read highway ways natively because GDAL can silently truncate OSM line reads."""
+    boundary_geometry = boundary.geometry.iloc[0]
+    xmin, ymin, xmax, ymax = boundary_geometry.bounds
+    records: list[dict[str, object]] = []
+
+    class RoadHandler(osmium.SimpleHandler):
+        def way(self, way) -> None:
+            highway = way.tags.get("highway")
+            if not highway:
+                return
+            try:
+                coordinates = [(node.lon, node.lat) for node in way.nodes]
+            except osmium.InvalidLocationError:
+                return
+            if len(coordinates) < 2:
+                return
+            xs, ys = zip(*coordinates, strict=True)
+            if max(xs) < xmin or min(xs) > xmax or max(ys) < ymin or min(ys) > ymax:
+                return
+            geometry = LineString(coordinates).intersection(boundary_geometry)
+            if geometry.is_empty:
+                return
+            records.append(
+                {
+                    "road_class": str(highway),
+                    "name": str(way.tags.get("name")) if way.tags.get("name") else None,
+                    "geometry": geometry,
+                }
+            )
+
+    RoadHandler().apply_file(RAW_DIR / "texas-latest.osm.pbf", locations=True, idx="flex_mem")
+    return gpd.GeoDataFrame(records, geometry="geometry", crs=WGS84)
+
+
 def _aggregate_roads(grid: gpd.GeoDataFrame, boundary: gpd.GeoDataFrame) -> pd.DataFrame:
-    roads = _read_osm_layer("lines", boundary)
-    if "highway" not in roads:
-        roads["highway"] = roads.apply(lambda row: _tags(row).get("highway"), axis=1)
-    roads = roads.loc[roads["highway"].notna(), ["highway", "geometry"]].to_crs(WORKING_CRS)
+    roads = _read_osm_roads(boundary).rename(columns={"road_class": "highway"})
+    roads = roads[["highway", "geometry"]].to_crs(WORKING_CRS)
     projected = grid[["h3_index", "geometry"]].to_crs(WORKING_CRS)
 
     pieces = gpd.overlay(projected, roads, how="intersection", keep_geom_type=False)

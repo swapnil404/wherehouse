@@ -11,6 +11,8 @@ PROCESSED_DIR = DATA_DIR / "processed"
 MANIFEST_PATH = DATA_DIR / "source-manifest.json"
 FACTS_PATH = PROCESSED_DIR / "h3_cell_facts.parquet"
 AIR_QUALITY_RASTER_PATH = PROCESSED_DIR / "air_quality.tif"
+TILE_SOURCE_DIR = PROCESSED_DIR / "tiles" / "source"
+TILE_OUTPUT_DIR = PROCESSED_DIR / "tiles" / "output"
 
 H3_RESOLUTION = 8
 PIPELINE_VERSION = "0.1.0"
