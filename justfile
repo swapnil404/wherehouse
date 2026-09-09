@@ -106,7 +106,7 @@ tiles-upload *LAYERS:
     set -euo pipefail
     bucket="${NEON_STORAGE_BUCKET:-wherehouse-map-data}"
     layers=({{LAYERS}})
-    if [ "${#layers[@]}" -eq 0 ]; then layers=(roads zoning flood buildings); fi
+    if [ "${#layers[@]}" -eq 0 ]; then layers=(roads zoning flood buildings poi); fi
     for layer in "${layers[@]}"; do
         file="pipeline/data/processed/tiles/output/${layer}.pmtiles"
         test -f "$file" || { echo "Missing $file; run 'just tiles-build' first."; exit 1; }

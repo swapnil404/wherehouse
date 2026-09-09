@@ -141,10 +141,11 @@ partially loaded refresh.
 
 ## PMTiles Map Layers
 
-The map's roads, zoning, flood, and building overlays are built separately from the Neon facts.
+The map's roads, zoning, flood, buildings, and classified POI overlays are built separately from
+the Neon facts.
 They are display geometry only: these commands do not write to Neon or change scoring.
 
-Prepare all four layers from the existing source snapshots, build them with Tippecanoe 2.17 or
+Prepare all five layers from the existing source snapshots, build them with Tippecanoe 2.17 or
 newer, and validate the outputs:
 
 ```bash
@@ -162,8 +163,10 @@ just tiles-validate zoning
 ```
 
 Intermediate FlatGeobuf and generated `.pmtiles` files stay under the ignored
-`pipeline/data/processed/tiles/` directory. The four vector layers retain only the attributes the
-UI needs. Their zoom ranges are roads 8–16, zoning and flood 9–16, and buildings 13–17.
+`pipeline/data/processed/tiles/` directory. The five vector layers retain only the attributes the
+UI needs. Their zoom ranges are roads 8–16, zoning and flood 9–16, buildings 13–17, and POIs 10–17.
+The POI archive contains individual OpenStreetMap locations classified by the same scoring logic
+as `competitor`, `complementary`, or `anchor`; generic `other` POIs are intentionally excluded.
 
 Neon Object Storage is declared in the root `neon.ts` as a public-read bucket named
 `wherehouse-map-data`. Link this repository to the existing Neon project once, then provision the

@@ -59,8 +59,8 @@ def main() -> None:
         tile_parser.add_argument(
             "layers",
             nargs="*",
-            choices=("roads", "zoning", "flood", "buildings"),
-            help="layers to process; defaults to all four",
+            choices=("roads", "zoning", "flood", "buildings", "poi"),
+            help="layers to process; defaults to all five",
         )
     args = parser.parse_args()
 

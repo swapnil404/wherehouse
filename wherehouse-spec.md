@@ -71,7 +71,7 @@ NEON POSTGRES + POSTGIS  ◄────  RENDER — FastAPI          (Megha)
   geo_dataset · h3_cell_fact     /heatmap /score /batch
   auth · app · later: reach      later: hotspots / catchment    │
                                                                │
-NEON OBJECT STORAGE — *.pmtiles (roads, zoning, flood, buildings) ────┘
+NEON OBJECT STORAGE — *.pmtiles (roads, zoning, flood, buildings, POIs) ────┘
 
 OFFLINE, NEVER DEPLOYED                                   (Swapnil)
   ingest → PostGIS  ·  OSRM Docker → cell_reach  ·  tippecanoe → Neon Object Storage
@@ -164,7 +164,7 @@ Heatmaps, point scoring, batch scoring, and later hotspot detection read the act
 Raw Austin OSM geometry is bulky and should not compete with application queries in Postgres. So:
 
 - **Postgres currently holds analysis-ready H3 facts** plus dataset provenance and application/auth tables. Precomputed reachability will be added later.
-- **Neon Object Storage holds display geometry** — `tippecanoe` builds vector tiles for roads, zoning, flood and buildings; `pmtiles` packs them into single files in a public-read bucket, read client-side via the `pmtiles://` protocol.
+- **Neon Object Storage holds display geometry** — `tippecanoe` builds vector tiles for roads, zoning, flood, buildings, and classified POIs; `pmtiles` packs them into single files in a public-read bucket, read client-side via the `pmtiles://` protocol. The visual POI categories reuse the ingestion classifier so map labels and scoring semantics stay aligned.
 - **Building footprints never enter Postgres.** They're aggregated to per-hex area at ingest and rendered only from tiles.
 
 This started as a cost workaround, but serving cartography from tiles rather than GeoJSON endpoints is what makes the map fast and deletes a whole class of backend endpoints. Keep it either way.

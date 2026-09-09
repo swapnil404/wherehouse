@@ -11,6 +11,7 @@ import pandas as pd
 from .build import (
     _boundary,
     _normalize_polygons,
+    _poi_kind,
     _read_osm_layer,
     _read_osm_roads,
     _tags,
@@ -63,6 +64,13 @@ LAYERS = {
         min_zoom=13,
         max_zoom=17,
         attributes=("building_type",),
+        attribution="OpenStreetMap contributors / Geofabrik",
+    ),
+    "poi": TileLayer(
+        name="poi",
+        min_zoom=10,
+        max_zoom=17,
+        attributes=("name", "poi_kind", "poi_type"),
         attribution="OpenStreetMap contributors / Geofabrik",
     ),
 }
@@ -134,11 +142,41 @@ def _buildings(boundary: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     return _clean(buildings, {"Polygon", "MultiPolygon"})
 
 
+def _poi_type(row) -> str:
+    for key in ("amenity", "shop", "building", "landuse", "tourism", "office"):
+        value = _tag_value(row, key)
+        if value:
+            return value
+    return "unknown"
+
+
+def _pois(boundary: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    collections = []
+    visible_kinds = {"competitor", "complementary", "anchor"}
+    for osm_layer in ("points", "multipolygons"):
+        pois = _read_osm_layer(osm_layer, boundary)
+        if pois.empty:
+            continue
+        pois["poi_kind"] = pois.apply(lambda row: _poi_kind(_tags(row)), axis=1)
+        pois = pois.loc[pois["poi_kind"].isin(visible_kinds)].copy()
+        if pois.empty:
+            continue
+        pois["name"] = pois.apply(lambda row: _tag_value(row, "name") or "", axis=1)
+        pois["poi_type"] = pois.apply(_poi_type, axis=1)
+        pois["geometry"] = pois.geometry.representative_point()
+        collections.append(pois[["name", "poi_kind", "poi_type", "geometry"]])
+    if not collections:
+        raise RuntimeError("No classified OSM POIs found inside the Austin boundary")
+    combined = gpd.GeoDataFrame(pd.concat(collections, ignore_index=True), crs=WGS84)
+    return _clean(combined, {"Point"})
+
+
 BUILDERS = {
     "roads": _roads,
     "zoning": _zoning,
     "flood": _flood,
     "buildings": _buildings,
+    "poi": _pois,
 }
 
 
@@ -220,4 +258,3 @@ def validate_pmtiles(names: list[str] | None = None) -> list[Path]:
         print(f"PASS {layer.name}: {path.stat().st_size:,} bytes", flush=True)
         outputs.append(path)
     return outputs
-
