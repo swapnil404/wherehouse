@@ -130,12 +130,25 @@ class HeatmapContractTests(unittest.TestCase):
         by_id = {c["id"]: c for c in evaluate_constraints(commercial, "ev")}
         self.assertEqual(
             set(by_id),
-            {"in_sfha", "dominant_zone_class", "highway_distance_km", "commercial_area_pct"},
+            {"in_sfha", "dominant_zone_class", "highway_distance_km"},
         )
         self.assertEqual(by_id["highway_distance_km"]["required"], 5.0)
-        self.assertEqual(by_id["commercial_area_pct"]["required"], 10.0)
         self.assertIn("industrial", by_id["dominant_zone_class"]["required"])
         self.assertNotIn("residential", by_id["dominant_zone_class"]["required"])
+
+    def test_ev_admits_low_commercial_industrial_sites(self) -> None:
+        industrial = self.frame.iloc[0]  # 5% commercial area
+        by_id = {c["id"]: c for c in evaluate_constraints(industrial, "ev")}
+        self.assertTrue(by_id["dominant_zone_class"]["pass"])
+        self.assertTrue(all(c["pass"] for c in by_id.values()))
+
+    def test_ev_competition_avoids_industrial_rivals(self) -> None:
+        isolated = self.frame.iloc[0]  # competitor_count_2km == 0
+        crowded = self.frame.iloc[1]  # competitor_count_2km == 4
+        self.assertGreater(
+            compute_subscores(isolated, "ev")["poi"],
+            compute_subscores(crowded, "ev")["poi"],
+        )
 
 
 if __name__ == "__main__":

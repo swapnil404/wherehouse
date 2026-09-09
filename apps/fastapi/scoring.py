@@ -51,14 +51,17 @@ PRESET_CONFIG = {
     # - income band set above retail: early EV adoption skews higher-income.
     # - highway scale 5 km: corridor visibility matters, tighter than
     #   warehouse (10 km) but looser than retail (3 km).
-    # - competition peaks at 1 charger within 2 km (spec section 8.3);
-    #   a second nearby charger saturates, zero means unproven demand.
+    # - competition: competitor_count_2km counts warehouse/industrial
+    #   competitors from the ingestion pipeline — NOT charging stations.
+    #   We have no charger-location data, so the term peaks at 0 nearby
+    #   competitors (avoid industrial friction), and must never be
+    #   presented as EV charger coverage.
     # - complementary uses the 2 km ring: amenities worth a charging stop.
     # - commercial frontage preferred; industrial acceptable for depots.
     "ev": {
         "income_target": 85_000, "income_width": 40_000,
         "age_target": 38, "age_width": 18, "highway_scale_km": 5,
-        "competitor_column": "competitor_count_2km", "competitor_target": 1,
+        "competitor_column": "competitor_count_2km", "competitor_target": 0,
         "competitor_width": 2,
         "complementary_column": "complementary_count_2km_percentile",
         "anchor_column": "anchor_count_2km_percentile",
@@ -172,7 +175,8 @@ def evaluate_constraints(row: Any, preset: str = "warehouse") -> List[Dict[str, 
         #   retail zone rule above, which does not admit industrial.
         # - 5 km highway cap mirrors the scoring scale: beyond that the
         #   site is not a corridor stop.
-        # - 10% commercial-area floor screens out purely residential cells.
+        # - No commercial-area floor: it would wrongly reject the
+        #   industrial sites this preset explicitly admits.
         constraints = [c for c in constraints if c["id"] != "dominant_zone_class"]
         allowed = ["commercial", "industrial"]
         constraints.append({
@@ -186,13 +190,6 @@ def evaluate_constraints(row: Any, preset: str = "warehouse") -> List[Dict[str, 
             "label": f"Highway distance {highway_distance:.1f} km (max 5 km)",
             "actual": round(highway_distance, 2), "required": 5.0,
             "pass": highway_distance <= 5.0,
-        })
-        commercial_pct = float(row["commercial_area_pct"])
-        constraints.append({
-            "id": "commercial_area_pct",
-            "label": f"Commercial area {commercial_pct:.1f}% (min 10%)",
-            "actual": round(commercial_pct, 1), "required": 10.0,
-            "pass": commercial_pct >= 10.0,
         })
     elif preset not in ("warehouse", "retail"):
         raise ValueError(f"Unknown scoring preset: {preset!r}")
