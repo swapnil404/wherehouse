@@ -102,7 +102,7 @@ export interface components {
              * @default warehouse
              * @enum {string}
              */
-            preset: "warehouse" | "retail";
+            preset: "warehouse" | "retail" | "ev";
             /** Weights */
             weights?: {
                 [key: string]: number;
@@ -160,7 +160,7 @@ export interface components {
              * Preset
              * @enum {string}
              */
-            preset: "warehouse" | "retail";
+            preset: "warehouse" | "retail" | "ev";
         };
         /** Point */
         Point: {
@@ -177,7 +177,7 @@ export interface components {
              * @default warehouse
              * @enum {string}
              */
-            preset: "warehouse" | "retail";
+            preset: "warehouse" | "retail" | "ev";
             /** Weights */
             weights?: {
                 [key: string]: number;
@@ -259,7 +259,7 @@ export interface operations {
     get_heatmap_v1_heatmap_get: {
         parameters: {
             query?: {
-                preset?: "warehouse" | "retail";
+                preset?: "warehouse" | "retail" | "ev";
             };
             header?: never;
             path?: never;
