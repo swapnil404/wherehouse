@@ -3,7 +3,8 @@ import { MapboxOverlay } from "@deck.gl/mapbox";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { CircleAlertIcon, LoaderCircleIcon, TriangleAlertIcon } from "lucide-react";
 import maplibregl from "maplibre-gl";
-import { useEffect, useMemo, useRef } from "react";
+import { Protocol } from "pmtiles";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import ScorePanel from "./score-panel";
 import {
@@ -22,6 +23,7 @@ import {
   colorForScore,
 } from "@/lib/heatmap-palette";
 import { computeGridAnalytics } from "@/lib/score-analytics";
+import { PMTILES_BASE_URL, TILE_LAYERS, archiveUrl } from "@/lib/tile-layers";
 import { useMapStore } from "@/stores/map-store";
 import { useTRPC } from "@/utils/trpc";
 
@@ -38,14 +40,43 @@ const BASEMAP_STYLE = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/sty
 
 const EMPTY_CELLS: HeatmapCell[] = [];
 
+/**
+ * `addProtocol` registers globally on maplibre, not per map, so this runs once
+ * per page rather than once per mount — re-registering on a remount would
+ * discard the archive header/directory cache the protocol keeps, and every
+ * visible tile would re-fetch.
+ *
+ * `metadata: true` costs one extra range request per archive and in exchange
+ * populates the attribution control from what Tippecanoe baked in. Attribution
+ * for OSM and the City of Austin data is not optional, so that trade is
+ * already decided.
+ */
+let pmtilesProtocolRegistered = false;
+function registerPMTilesProtocol() {
+  if (pmtilesProtocolRegistered) return;
+  maplibregl.addProtocol("pmtiles", new Protocol({ metadata: true }).tile);
+  pmtilesProtocolRegistered = true;
+}
+
+/**
+ * Where deck's hexes get inserted into the basemap's layer stack.
+ *
+ * `null` means the style is not ready yet. `{ beforeId: undefined }` means it
+ * is ready but nothing was found to anchor against, so deck draws on top —
+ * which is the old overlaid behaviour and a safe fallback rather than a crash.
+ */
+type DeckAnchor = { beforeId: string | undefined } | null;
+
 export default function MapCanvas() {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const overlayRef = useRef<MapboxOverlay | null>(null);
+  const [deckAnchor, setDeckAnchor] = useState<DeckAnchor>(null);
 
   const trpc = useTRPC();
   const preset = useMapStore((s) => s.preset);
-  const heatmap = useMapStore((s) => s.layers.heatmap);
+  const mapLayers = useMapStore((s) => s.layers);
+  const heatmap = mapLayers.heatmap;
   const eligibleOnly = useMapStore((s) => s.eligibleOnly);
   const setHeatmapStats = useMapStore((s) => s.setHeatmapStats);
   const setPresets = useMapStore((s) => s.setPresets);
@@ -103,6 +134,8 @@ export default function MapCanvas() {
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
 
+    registerPMTilesProtocol();
+
     const map = new maplibregl.Map({
       container: containerRef.current,
       style: BASEMAP_STYLE,
@@ -114,6 +147,30 @@ export default function MapCanvas() {
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
     map.addControl(new maplibregl.ScaleControl({ unit: "metric" }), "bottom-left");
     map.getCanvas().style.cursor = "crosshair";
+
+    map.on("load", () => {
+      // The basemap's first symbol layer is where its labels begin. Everything
+      // we add goes below it, so street and place names stay on top of both
+      // the overlays and the hexes. Found by scanning rather than hardcoding
+      // an id, so a CARTO style revision cannot silently bury the labels.
+      const labelStart = map.getStyle().layers.find((l) => l.type === "symbol")?.id;
+
+      if (PMTILES_BASE_URL) {
+        for (const layer of TILE_LAYERS) {
+          map.addSource(layer.sourceId, { type: "vector", url: archiveUrl(layer) });
+          // Each insert lands immediately below `labelStart`, so the layers
+          // stack in array order: zoning at the bottom, roads on top.
+          map.addLayer(layer.style, labelStart);
+        }
+      }
+
+      // Hexes go below the first overlay, which puts the stack, bottom to top:
+      // basemap, hexes, overlays, labels. With no tiles configured there is no
+      // overlay to sit under, so they anchor to the label boundary instead —
+      // anchoring to a layer that was never added would throw in `addLayer`.
+      setDeckAnchor({ beforeId: PMTILES_BASE_URL ? TILE_LAYERS[0].style.id : labelStart });
+    });
+
     map.on("click", ({ lngLat }) => {
       const { preset: activePreset, customWeights: edits } = useMapStore.getState();
       scorePointRef.current({
@@ -126,12 +183,13 @@ export default function MapCanvas() {
       });
     });
 
-    // Overlaid rather than interleaved: no dependency on the basemap's internal
-    // layer ids. The tradeoff is that deck draws above the basemap's street
-    // labels — revisit with `interleaved: true` plus a `beforeId` if labels need
-    // to sit on top of the hexes.
+    // Interleaved: deck shares the basemap's GL context and its layers live in
+    // the same stack, which is the only way the PMTiles overlays and the
+    // basemap's labels can draw *above* the hexes. The cost is a dependency on
+    // the basemap's layer ids, kept to the single lookup in the `load` handler
+    // above and degraded to "draw on top" rather than a throw if it fails.
     const overlay = new MapboxOverlay({
-      interleaved: false,
+      interleaved: true,
       layers: [],
       getTooltip: ({ object }) => {
         const cell = object as HeatmapCell | undefined;
@@ -186,12 +244,25 @@ export default function MapCanvas() {
   }, []);
 
   const layers = useMemo(() => {
+    // Interleaved layers are inserted with `map.addLayer(group, beforeId)`, so
+    // handing deck a `beforeId` before the style has that layer would throw.
+    // Nothing renders until the `load` handler has published the anchor.
+    if (!deckAnchor) return [];
+
+    // `@deck.gl/mapbox` reads `beforeId` off a layer's props in interleaved
+    // mode, but it is not part of deck's core layer props and the package does
+    // not export the type that adds it. Spread rather than written inline:
+    // that is what keeps TypeScript from rejecting it as an excess property,
+    // without reaching for `as any` on the whole layer.
+    const placement = { beforeId: deckAnchor.beforeId };
+
     return [
       // The heatmap fill is conditional, but the selection ring below is not:
       // hiding the layer should not also discard the user's selection.
       ...(heatmap.visible && weightsReady
         ? [
             new H3HexagonLayer<HeatmapCell>({
+              ...placement,
               id: "score-heatmap",
               data: visibleCells,
               getHexagon: (d) => d.h3Index,
@@ -221,6 +292,7 @@ export default function MapCanvas() {
       ...(selectedH3
         ? [
             new H3HexagonLayer<{ h3Index: string }>({
+              ...placement,
               id: "selected-cell",
               data: [{ h3Index: selectedH3 }],
               getHexagon: (d) => d.h3Index,
@@ -237,11 +309,33 @@ export default function MapCanvas() {
           ]
         : []),
     ];
-  }, [heatmap.visible, heatmap.opacity, visibleCells, weights, weightsReady, selectedH3]);
+  }, [
+    deckAnchor,
+    heatmap.visible,
+    heatmap.opacity,
+    visibleCells,
+    weights,
+    weightsReady,
+    selectedH3,
+  ]);
 
   useEffect(() => {
     overlayRef.current?.setProps({ layers });
   }, [layers]);
+
+  // Push the rail's toggles and sliders onto the style. Runs off `deckAnchor`
+  // rather than a mount-time flag because that is the signal the `load`
+  // handler finished adding these layers.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !deckAnchor || !PMTILES_BASE_URL) return;
+
+    for (const layer of TILE_LAYERS) {
+      const state = mapLayers[layer.id];
+      map.setLayoutProperty(layer.style.id, "visibility", state.visible ? "visible" : "none");
+      map.setPaintProperty(layer.style.id, layer.opacityProperty, state.opacity);
+    }
+  }, [deckAnchor, mapLayers]);
 
   // Publish band counts for the rail's legend. Derived from every cell, not
   // just the visible ones, so the distribution does not shift when the

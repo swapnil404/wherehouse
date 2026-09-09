@@ -50,21 +50,48 @@ function LayerRow({ id }: { id: LayerId }) {
           {meta.hint}
         </p>
       ) : layer.visible ? (
-        <div className="mt-1 flex items-center gap-2 pl-6.5">
-          <Slider
-            aria-label={`${meta.label} opacity`}
-            value={Math.round(layer.opacity * 100)}
-            min={0}
-            max={100}
-            step={5}
-            onValueChange={(value) => {
-              if (typeof value === "number") setLayerOpacity(id, value / 100);
-            }}
-          />
-          <span className="w-8 shrink-0 text-right text-[11px] tabular-nums text-muted-foreground">
-            {Math.round(layer.opacity * 100)}%
-          </span>
-        </div>
+        <>
+          <div className="mt-1 flex items-center gap-2 pl-6.5">
+            <Slider
+              aria-label={`${meta.label} opacity`}
+              value={Math.round(layer.opacity * 100)}
+              min={0}
+              max={100}
+              step={5}
+              onValueChange={(value) => {
+                if (typeof value === "number") setLayerOpacity(id, value / 100);
+              }}
+            />
+            <span className="w-8 shrink-0 text-right text-[11px] tabular-nums text-muted-foreground">
+              {Math.round(layer.opacity * 100)}%
+            </span>
+          </div>
+
+          {/* Only shown while the layer is drawn, so the rail carries a key
+              for exactly the colors currently on the map. Categories are never
+              identified by hue alone. */}
+          {meta.legend ? (
+            <ul className="mt-1.5 space-y-1 pl-6.5">
+              {meta.legend.map((entry) => (
+                <li key={entry.label} className="flex items-center gap-2">
+                  <span
+                    aria-hidden
+                    className="size-2.5 shrink-0 rounded-[2px]"
+                    style={{ backgroundColor: entry.hex }}
+                  />
+                  <span className="text-[11px] text-muted-foreground">{entry.label}</span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </>
+      ) : null}
+
+      {/* A hint on an available layer is a caveat, not a blocker — buildings
+          only draw past zoom 13. Shown in both states: before ticking the box
+          it sets the expectation, after ticking it explains an empty map. */}
+      {!disabled && meta.hint ? (
+        <p className="mt-1 pl-6.5 text-[11px] text-muted-foreground/70">{meta.hint}</p>
       ) : null}
     </div>
   );

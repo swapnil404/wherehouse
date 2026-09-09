@@ -2,8 +2,14 @@ import { create } from "zustand";
 
 import type { PresetName, SubscoreKey, Weights } from "@/lib/cells";
 import type { GridAnalytics } from "@/lib/score-analytics";
+import {
+  PMTILES_BASE_URL,
+  TILE_LAYERS,
+  type LegendEntry,
+  type TileLayerId,
+} from "@/lib/tile-layers";
 
-export type LayerId = "heatmap" | "poi" | "zoning" | "flood";
+export type LayerId = "heatmap" | "poi" | "zoning" | "flood" | "buildings" | "roads";
 
 export interface LayerState {
   visible: boolean;
@@ -14,21 +20,52 @@ export interface LayerMeta {
   id: LayerId;
   label: string;
   /**
-   * Layers whose source data has not been tiled yet. They render as disabled
-   * rows rather than being hidden, so the shell shows the real shape of the
-   * product.
+   * Layers whose source data has not been tiled yet, or whose tile bucket is
+   * not configured in this deployment. They render as disabled rows rather
+   * than being hidden, so the shell shows the real shape of the product.
    */
   available: boolean;
   hint?: string;
+  /**
+   * Rendered as swatches under the row. Present on every layer that paints
+   * more than one color, so a category is never identified by color alone.
+   */
+  legend?: readonly LegendEntry[];
 }
 
-/** Rail order. Heatmap first — it is the layer the product is about. */
+const TILES_UNAVAILABLE_HINT = "Set VITE_PMTILES_BASE_URL to enable";
+
+/**
+ * Rail order. Heatmap first — it is the layer the product is about — then the
+ * tile overlays in the order they stack on the map, so the list reads top-down
+ * the way the map reads bottom-up.
+ */
 export const LAYER_META: readonly LayerMeta[] = [
   { id: "heatmap", label: "Score heatmap", available: true },
+  ...TILE_LAYERS.map(
+    (layer): LayerMeta => ({
+      id: layer.id,
+      label: layer.label,
+      available: PMTILES_BASE_URL !== null,
+      hint: PMTILES_BASE_URL === null ? TILES_UNAVAILABLE_HINT : layer.hint,
+      legend: layer.legend,
+    }),
+  ),
   { id: "poi", label: "Points of interest", available: false, hint: "Awaiting POI layer" },
-  { id: "zoning", label: "Zoning", available: false, hint: "Awaiting vector tiles" },
-  { id: "flood", label: "Flood zones", available: false, hint: "Awaiting vector tiles" },
 ] as const;
+
+/**
+ * Every tile overlay starts hidden. They draw *above* the hexes, so switching
+ * one on by default would mean the product's own layer opens partly covered.
+ * Their opacities come from the specs rather than being restated here.
+ */
+const INITIAL_LAYERS: Record<LayerId, LayerState> = {
+  heatmap: { visible: true, opacity: 0.8 },
+  poi: { visible: false, opacity: 0.9 },
+  ...(Object.fromEntries(
+    TILE_LAYERS.map((layer) => [layer.id, { visible: false, opacity: layer.defaultOpacity }]),
+  ) as Record<TileLayerId, LayerState>),
+};
 
 export interface HeatmapStats {
   /** Cells per score band, same order as `SCORE_BINS`. */
@@ -85,12 +122,7 @@ interface MapStore {
 }
 
 export const useMapStore = create<MapStore>((set) => ({
-  layers: {
-    heatmap: { visible: true, opacity: 0.8 },
-    poi: { visible: false, opacity: 0.9 },
-    zoning: { visible: false, opacity: 0.5 },
-    flood: { visible: false, opacity: 0.6 },
-  },
+  layers: INITIAL_LAYERS,
   preset: "warehouse",
   eligibleOnly: false,
   heatmapStats: null,

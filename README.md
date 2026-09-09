@@ -181,10 +181,35 @@ The uploader uses the authenticated Neon CLI, so no separate AWS or Cloudflare c
 needed. To target a different declared bucket, run the upload with
 `NEON_STORAGE_BUCKET=your-bucket-name`.
 
-Copy the public object URLs from Neon into the frontend configuration. Before wiring them into
-MapLibre, confirm the public endpoint returns byte-range responses and permits requests from the
-production web origin. Rebuild and upload a layer with the same name only when intentionally
-publishing a new snapshot.
+Rebuild and upload a layer with the same name only when intentionally publishing a new snapshot.
+
+### Serving the tiles to the map
+
+Point the web app at the bucket's public base URL, with no trailing slash and no filename:
+
+```bash
+# apps/web/.env
+VITE_PMTILES_BASE_URL=https://your-bucket.storage.region.aws.neon.tech/wherehouse-map-data
+```
+
+The variable is optional. Without it the map still runs on the API-served score heatmap and the
+four overlay rows render disabled, so a deployment cannot be broken by a missing bucket — but it
+also means a typo'd URL fails quietly, as four layers that never appear.
+
+The client resolves `pmtiles://<base>/<layer>.pmtiles` through the `pmtiles` protocol registered in
+`apps/web/src/components/map-canvas.tsx`, which range-fetches individual tiles rather than the
+whole archive. That only works if the endpoint serves `206 Partial Content` with `Accept-Ranges:
+bytes` and an `Access-Control-Allow-Origin` that covers the web origin. Neon's public buckets do,
+but confirm it after any storage change:
+
+```bash
+curl -sI -r 0-16 -H "Origin: http://localhost:3001" \
+  "$VITE_PMTILES_BASE_URL/zoning.pmtiles"
+```
+
+Layer styling, the categorical palette, and draw order live in `apps/web/src/lib/tile-layers.ts`.
+The deck.gl overlay runs interleaved so the overlays and the basemap's labels draw above the score
+hexes; the anchor is resolved from the live style rather than hardcoded.
 
 ## UI Customization
 
