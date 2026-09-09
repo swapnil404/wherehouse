@@ -196,7 +196,7 @@ VITE_PMTILES_BASE_URL=https://your-bucket.storage.region.aws.neon.tech/wherehous
 ```
 
 The variable is optional. Without it the map still runs on the API-served score heatmap and the
-four overlay rows render disabled, so a deployment cannot be broken by a missing bucket — but it
+five overlay rows render disabled, so a deployment cannot be broken by a missing bucket — but it
 also means a typo'd URL fails quietly, as four layers that never appear.
 
 The client resolves `pmtiles://<base>/<layer>.pmtiles` through the `pmtiles` protocol registered in

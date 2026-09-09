@@ -9,7 +9,7 @@ import {
   type TileLayerId,
 } from "@/lib/tile-layers";
 
-export type LayerId = "heatmap" | "poi" | "zoning" | "flood" | "buildings" | "roads";
+export type LayerId = "heatmap" | TileLayerId;
 
 export interface LayerState {
   visible: boolean;
@@ -42,16 +42,13 @@ const TILES_UNAVAILABLE_HINT = "Set VITE_PMTILES_BASE_URL to enable";
  */
 export const LAYER_META: readonly LayerMeta[] = [
   { id: "heatmap", label: "Score heatmap", available: true },
-  ...TILE_LAYERS.map(
-    (layer): LayerMeta => ({
-      id: layer.id,
-      label: layer.label,
-      available: PMTILES_BASE_URL !== null,
-      hint: PMTILES_BASE_URL === null ? TILES_UNAVAILABLE_HINT : layer.hint,
-      legend: layer.legend,
-    }),
-  ),
-  { id: "poi", label: "Points of interest", available: false, hint: "Awaiting POI layer" },
+  ...TILE_LAYERS.map((layer): LayerMeta => ({
+    id: layer.id,
+    label: layer.label,
+    available: PMTILES_BASE_URL !== null,
+    hint: PMTILES_BASE_URL === null ? TILES_UNAVAILABLE_HINT : layer.hint,
+    legend: layer.legend,
+  })),
 ] as const;
 
 /**
@@ -61,9 +58,11 @@ export const LAYER_META: readonly LayerMeta[] = [
  */
 const INITIAL_LAYERS: Record<LayerId, LayerState> = {
   heatmap: { visible: true, opacity: 0.8 },
-  poi: { visible: false, opacity: 0.9 },
   ...(Object.fromEntries(
-    TILE_LAYERS.map((layer) => [layer.id, { visible: false, opacity: layer.defaultOpacity }]),
+    TILE_LAYERS.map((layer) => [
+      layer.id,
+      { visible: false, opacity: layer.defaultOpacity },
+    ]),
   ) as Record<TileLayerId, LayerState>),
 };
 

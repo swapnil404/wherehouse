@@ -1,5 +1,9 @@
 import { env } from "@wherehouse/env/web";
-import type { FillLayerSpecification, LineLayerSpecification } from "maplibre-gl";
+import type {
+  CircleLayerSpecification,
+  FillLayerSpecification,
+  LineLayerSpecification,
+} from "maplibre-gl";
 
 /**
  * Display overlays served as PMTiles from Neon Object Storage.
@@ -11,9 +15,10 @@ import type { FillLayerSpecification, LineLayerSpecification } from "maplibre-gl
  */
 
 /** Trailing slash trimmed so the archive URLs below can join with a plain `/`. */
-export const PMTILES_BASE_URL = env.VITE_PMTILES_BASE_URL?.replace(/\/+$/, "") ?? null;
+export const PMTILES_BASE_URL =
+  env.VITE_PMTILES_BASE_URL?.replace(/\/+$/, "") ?? null;
 
-export type TileLayerId = "zoning" | "flood" | "buildings" | "roads";
+export type TileLayerId = "zoning" | "flood" | "buildings" | "roads" | "poi";
 
 export interface LegendEntry {
   label: string;
@@ -32,9 +37,10 @@ export interface TileLayerSpec {
    * already carries it.
    */
   sourceId: string;
-  style: FillLayerSpecification | LineLayerSpecification;
+  style:
+    FillLayerSpecification | LineLayerSpecification | CircleLayerSpecification;
   /** The paint property the rail's opacity slider drives. */
-  opacityProperty: "fill-opacity" | "line-opacity";
+  opacityProperty: "fill-opacity" | "line-opacity" | "circle-opacity";
   /**
    * Seeds the store's slider and the style's initial paint value, so the two
    * cannot drift. Fills sit lower than line work: a wash has to let the score
@@ -80,6 +86,13 @@ export const ZONING_COLORS = {
 export const FLOOD_COLORS = {
   sfha: "#d03b3b",
   moderate: "#ec835a",
+} as const;
+
+/** POI roles used by the ingestion classifier and written into `poi.pmtiles`. */
+export const POI_COLORS = {
+  competitor: "#e66767",
+  complementary: "#45b98c",
+  anchor: "#f0b95a",
 } as const;
 
 /**
@@ -245,7 +258,15 @@ export const TILE_LAYERS: readonly TileLayerSpec[] = [
           ["linear"],
           ["zoom"],
           8,
-          ["match", ["get", "road_class"], ["motorway", "trunk"], 1.2, "service", 0, 0.3],
+          [
+            "match",
+            ["get", "road_class"],
+            ["motorway", "trunk"],
+            1.2,
+            "service",
+            0,
+            0.3,
+          ],
           12,
           [
             "match",
@@ -274,6 +295,61 @@ export const TILE_LAYERS: readonly TileLayerSpec[] = [
       },
     },
   },
+  {
+    id: "poi",
+    label: "Points of interest",
+    archive: "poi",
+    sourceId: "wh-poi",
+    opacityProperty: "circle-opacity",
+    defaultOpacity: 0.9,
+    style: {
+      id: "wh-poi-circle",
+      type: "circle",
+      source: "wh-poi",
+      "source-layer": "poi",
+      minzoom: 10,
+      paint: {
+        "circle-color": [
+          "match",
+          ["get", "poi_kind"],
+          "competitor",
+          POI_COLORS.competitor,
+          "complementary",
+          POI_COLORS.complementary,
+          "anchor",
+          POI_COLORS.anchor,
+          "#898781",
+        ],
+        "circle-radius": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          10,
+          2,
+          13,
+          4,
+          17,
+          7,
+        ],
+        "circle-stroke-color": "#0e0e0e",
+        "circle-stroke-width": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          10,
+          0.5,
+          15,
+          1.5,
+        ],
+      },
+    },
+    legend: [
+      { label: "Competitor", hex: POI_COLORS.competitor },
+      { label: "Complementary", hex: POI_COLORS.complementary },
+      { label: "Anchor", hex: POI_COLORS.anchor },
+    ],
+    hint: "Visible from zoom 10",
+  },
 ] as const;
 
 /**
@@ -285,6 +361,7 @@ export const TILE_LAYERS: readonly TileLayerSpec[] = [
 
 /** URL for MapLibre's `pmtiles://` protocol handler. */
 export function archiveUrl(layer: TileLayerSpec): string {
-  if (!PMTILES_BASE_URL) throw new Error("VITE_PMTILES_BASE_URL is not configured");
+  if (!PMTILES_BASE_URL)
+    throw new Error("VITE_PMTILES_BASE_URL is not configured");
   return `pmtiles://${PMTILES_BASE_URL}/${layer.archive}.pmtiles`;
 }
