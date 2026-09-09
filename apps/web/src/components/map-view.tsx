@@ -1,7 +1,9 @@
 import { ClientOnly } from "@tanstack/react-router";
 import { Suspense, lazy } from "react";
 
+import HeatmapLegend from "./heatmap-legend";
 import LayerPanel from "./layer-panel";
+import PresetPicker from "./preset-picker";
 
 /**
  * Hybrid shell: the layer rail is docked on the left because its controls are
@@ -36,6 +38,13 @@ export default function MapView() {
             <MapCanvas />
           </Suspense>
         </ClientOnly>
+
+        {/* Outside the client-only boundary: it is store-driven React with no
+            `window` access, so it renders on first paint and stays put while
+            the map chunk loads. After ClientOnly in the DOM so it layers
+            above the canvas without needing a stacking hack. */}
+        <PresetPicker />
+        <HeatmapLegend />
       </div>
     </div>
   );

@@ -2,9 +2,9 @@ import { Checkbox } from "@wherehouse/ui/components/checkbox";
 import { Label } from "@wherehouse/ui/components/label";
 import { Separator } from "@wherehouse/ui/components/separator";
 import { Slider } from "@wherehouse/ui/components/slider";
+import { CircleDashedIcon } from "lucide-react";
 
-import HeatmapLegend from "./heatmap-legend";
-import { SUBSCORE_KEYS, SUBSCORE_LABELS } from "@/lib/cells";
+import WeightEditor from "./weight-editor";
 import { LAYER_META, useMapStore, type LayerId } from "@/stores/map-store";
 
 function SectionHeading({ children }: { children: React.ReactNode }) {
@@ -45,9 +45,12 @@ function LayerRow({ id }: { id: LayerId }) {
       </div>
 
       {disabled ? (
-        <p className="mt-0.5 pl-[26px] text-[11px] text-muted-foreground/70">{meta.hint}</p>
+        <p className="mt-0.5 flex items-center gap-1 pl-6.5 text-[11px] text-muted-foreground/70">
+          <CircleDashedIcon className="size-3 shrink-0" />
+          {meta.hint}
+        </p>
       ) : layer.visible ? (
-        <div className="mt-1 flex items-center gap-2 pl-[26px]">
+        <div className="mt-1 flex items-center gap-2 pl-6.5">
           <Slider
             aria-label={`${meta.label} opacity`}
             value={Math.round(layer.opacity * 100)}
@@ -68,13 +71,19 @@ function LayerRow({ id }: { id: LayerId }) {
 }
 
 /**
- * Docked left rail. Layer toggles and the legend live here because they are
- * always relevant; the score panel floats over the map instead, since it only
- * has anything to say once a cell is picked.
+ * Docked left rail. Preset, layer toggles and the legend live here because they
+ * are always relevant; the score panel floats over the map instead, since it
+ * only has anything to say once a cell is picked.
  */
 export default function LayerPanel() {
+  const stats = useMapStore((s) => s.heatmapStats);
+  const eligibleOnly = useMapStore((s) => s.eligibleOnly);
+  const setEligibleOnly = useMapStore((s) => s.setEligibleOnly);
+  const preset = useMapStore((s) => s.preset);
+  const presets = useMapStore((s) => s.presets);
+
   return (
-    <aside className="flex w-64 shrink-0 flex-col gap-4 overflow-y-auto border-r border-border bg-card p-4">
+    <aside className="scrollbar-subtle flex w-64 shrink-0 flex-col gap-4 overflow-y-auto border-r border-border bg-card p-4">
       <div>
         <SectionHeading>Layers</SectionHeading>
         <div className="mt-2">
@@ -86,36 +95,27 @@ export default function LayerPanel() {
 
       <Separator />
 
-      {/* Placeholder: the weight editor is a later pass. The section is laid
-          out now so dropping real sliders in needs no restructuring. */}
-      <div aria-hidden className="opacity-40">
-        <div className="flex items-baseline justify-between">
-          <SectionHeading>Weights</SectionHeading>
-          <span className="text-[10px] text-muted-foreground">soon</span>
+      <div>
+        <div className="flex items-center gap-2.5">
+          <Checkbox
+            id="eligible-only"
+            checked={eligibleOnly}
+            onCheckedChange={(checked) => setEligibleOnly(checked === true)}
+          />
+          <Label htmlFor="eligible-only" className="flex-1 cursor-pointer text-sm">
+            Eligible sites only
+          </Label>
         </div>
-        <div className="mt-2 space-y-2">
-          {SUBSCORE_KEYS.map((key) => (
-            <div key={key}>
-              <div className="flex items-baseline justify-between">
-                <span className="text-[11px] text-muted-foreground">
-                  {SUBSCORE_LABELS[key]}
-                </span>
-                <span className="text-[11px] text-muted-foreground">—</span>
-              </div>
-              <div className="mt-1 h-1 w-full rounded-full bg-input" />
-            </div>
-          ))}
-        </div>
+        <p className="mt-0.5 pl-6.5 text-[11px] text-muted-foreground/70">
+          {stats
+            ? `${stats.eligible} of ${stats.total} cells pass every constraint`
+            : "Passes every hard constraint"}
+        </p>
       </div>
 
       <Separator />
 
-      <div>
-        <SectionHeading>Score</SectionHeading>
-        <div className="mt-2">
-          <HeatmapLegend hasData={false} />
-        </div>
-      </div>
+      <WeightEditor presetWeights={presets?.[preset] ?? null} />
     </aside>
   );
 }

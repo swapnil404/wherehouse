@@ -1,2 +1,48 @@
 @import "@wherehouse/ui/globals.css";
 @import "maplibre-gl/dist/maplibre-gl.css";
+
+/**
+ * Themed scrollbar for the app's own scroll containers.
+ *
+ * The default platform scrollbar is a light chunky bar that reads as a
+ * foreign element on the dark chrome. Tailwind ships no scrollbar utilities,
+ * so this is a real one.
+ *
+ * `scrollbar-width`/`scrollbar-color` cover Firefox and Chromium 121+; the
+ * `::-webkit-scrollbar` block covers older WebKit/Blink, which ignores the
+ * standard properties. Both are declared because neither alone is universal.
+ *
+ * `scrollbar-gutter: stable` reserves the track so content does not shift
+ * sideways when the bar appears and disappears.
+ */
+@utility scrollbar-subtle {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, var(--foreground) 20%, transparent) transparent;
+  scrollbar-gutter: stable;
+
+  &::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  /* Transparent border plus `background-clip: content-box` insets the thumb,
+     so it reads as a slim pill rather than a bar wedged against the edge. */
+  &::-webkit-scrollbar-thumb {
+    background-color: color-mix(in oklab, var(--foreground) 18%, transparent);
+    border: 3px solid transparent;
+    background-clip: content-box;
+    border-radius: 9999px;
+  }
+
+  &::-webkit-scrollbar-thumb:hover {
+    background-color: color-mix(in oklab, var(--foreground) 32%, transparent);
+  }
+
+  &::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+}

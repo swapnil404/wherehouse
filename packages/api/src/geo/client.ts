@@ -5,6 +5,13 @@ import type { components, operations } from "./openapi.generated";
 type PresetsOperation = operations["get_presets_v1_presets_get"];
 type HeatmapOperation = operations["get_heatmap_v1_heatmap_get"];
 
+/**
+ * Derived from the generated schema rather than hand-listed, so adding a
+ * preset on the Python side widens this automatically instead of silently
+ * leaving the new preset unreachable from the client.
+ */
+export type PresetName = components["schemas"]["HeatmapResponse"]["preset"];
+
 export type GeoPresets =
   PresetsOperation["responses"][200]["content"]["application/json"];
 export type HeatmapResponse =
@@ -70,7 +77,7 @@ export function getPresets(): Promise<GeoPresets> {
   return request<GeoPresets>("/v1/presets");
 }
 
-export function getHeatmap(preset: "warehouse" | "retail"): Promise<HeatmapResponse> {
+export function getHeatmap(preset: PresetName): Promise<HeatmapResponse> {
   const query = new URLSearchParams({ preset });
   return request<HeatmapResponse>(`/v1/heatmap?${query}`);
 }

@@ -1,21 +1,23 @@
+import type { HeatmapResponse, PresetName } from "@wherehouse/api/geo/client";
+
 /**
- * The grid payload contract the heatmap reads.
+ * Client-side scoring over the real heatmap payload.
  *
- * This is the shape the future `geo.cells` procedure has to return — frozen
- * here so the layer, the legend and the panels can be built before the
- * endpoint exists. Nothing in the UI should widen it.
+ * The API deliberately returns **weight-independent subscores** per cell
+ * (`GET /v1/heatmap`), not a composite score. That is what lets a preset
+ * change or a weight edit recolor the map with no network call — the client
+ * does one weighted average and nothing else; the scoring math itself stays in
+ * Python.
  *
- * Three deliberate choices:
- *
- * - **No geometry.** `h3-js` reconstructs the hexagon boundary from
- *   `h3Index` client-side, so polygons never cross the wire.
- * - **Subscores, not a composite score.** Weight sliders recompute
- *   `Σ(w·s)/Σw` locally with no network call; that only works if the client
- *   holds every per-cell subscore. Sending one blended number would put a
- *   round trip behind every slider drag.
- * - **`null` means "not available yet"**, never zero. A missing subscore has
- *   to be distinguishable from a real subscore of 0.
+ * Types are derived from the generated OpenAPI client rather than redeclared,
+ * so a schema change surfaces as a compile error here.
  */
+
+export type { PresetName };
+export type HeatmapCell = HeatmapResponse["cells"][number];
+export type Subscores = HeatmapCell["subscores"];
+export type SubscoreKey = keyof Subscores;
+export type Weights = Partial<Record<SubscoreKey, number>>;
 
 export const SUBSCORE_KEYS = [
   "demographics",
@@ -24,23 +26,13 @@ export const SUBSCORE_KEYS = [
   "zoning",
   "flood",
   "aqi",
-] as const;
+] as const satisfies readonly SubscoreKey[];
 
-export type SubscoreKey = (typeof SUBSCORE_KEYS)[number];
+/** Fails to compile if the API gains a subscore not listed above. */
+const _assertSubscoresExhaustive: (typeof SUBSCORE_KEYS)[number] =
+  null as unknown as SubscoreKey;
+void _assertSubscoresExhaustive;
 
-export type Subscores = Record<SubscoreKey, number>;
-
-export type Weights = Record<SubscoreKey, number>;
-
-export interface CellRecord {
-  h3Index: string;
-  /** `null` until the scoring engine reads the ingested grid. */
-  subscores: Subscores | null;
-  /** `null` until the constraint evaluation is wired. */
-  eligible: boolean | null;
-}
-
-/** Human-readable labels for the six scoring layers. */
 export const SUBSCORE_LABELS: Record<SubscoreKey, string> = {
   demographics: "Demographics",
   transport: "Transport",
@@ -50,13 +42,18 @@ export const SUBSCORE_LABELS: Record<SubscoreKey, string> = {
   aqi: "Air quality",
 };
 
+export const PRESET_LABELS: Record<PresetName, string> = {
+  warehouse: "Warehouse",
+  retail: "Retail",
+  ev: "EV charging",
+};
+
 /**
- * One weighted average, and nothing else — the scoring math itself stays in
- * Python. Returns `null` when subscores are absent so callers propagate the
- * gap instead of rendering a fabricated 0.
+ * One weighted average, and nothing else. Returns `null` when there is nothing
+ * to average so callers propagate the gap rather than rendering a fabricated 0.
  */
 export function compositeScore(
-  subscores: Subscores | null,
+  subscores: Subscores | null | undefined,
   weights: Weights,
 ): number | null {
   if (!subscores) return null;
@@ -64,9 +61,9 @@ export function compositeScore(
   let weighted = 0;
   let total = 0;
   for (const key of SUBSCORE_KEYS) {
-    const w = weights[key] ?? 0;
-    weighted += w * subscores[key];
-    total += w;
+    const weight = weights[key] ?? 0;
+    weighted += weight * subscores[key];
+    total += weight;
   }
 
   if (total === 0) return null;
