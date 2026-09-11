@@ -124,7 +124,7 @@ export interface HotspotStats {
 const INITIAL_LAYERS: Record<LayerId, LayerState> = {
   heatmap: { visible: true, opacity: 0.8 },
   hotspots: { visible: false, opacity: 0.9 },
-  underserved: { visible: false, opacity: 0.75 },
+  underserved: { visible: false, opacity: 0.9 },
   ...(Object.fromEntries(
     TILE_LAYERS.map((layer) => [
       layer.id,

@@ -110,6 +110,42 @@ export const POI_COLORS = {
 } as const;
 
 /**
+ * What the three roles actually mean, transcribed from `_poi_kind` in
+ * `pipeline/src/wherehouse_pipeline/build.py`. `examples` lists the real OSM
+ * tag values that classifier matches on — not a paraphrase.
+ *
+ * Two things the reader has to be told, because the labels imply otherwise:
+ *
+ * 1. The classification is fixed at ingestion from OSM tags alone. It does
+ *    *not* vary with the active preset, so "Competitor" means an industrial
+ *    or warehouse site whether the user is looking at warehouse, retail or
+ *    EV. Under the EV preset especially that is not a competing charger, and
+ *    there is no charger-supply data anywhere in this dataset.
+ * 2. The classifier's fourth bucket, `other`, is excluded from the archive
+ *    entirely, so these three are the whole layer rather than a selection
+ *    from it.
+ */
+export const POI_KIND_META = {
+  competitor: {
+    label: "Competitor",
+    definition: "Warehouse or industrial site",
+    examples: "building=warehouse/industrial, landuse=industrial/logistics",
+  },
+  complementary: {
+    label: "Complementary",
+    definition: "Everyday service or trade supply",
+    examples: "Fuel, bank, restaurant, cafe, convenience, hardware, trade",
+  },
+  anchor: {
+    label: "Anchor",
+    definition: "Large footfall generator",
+    examples: "Hospital, university, marketplace, mall, supermarket, department store",
+  },
+} as const;
+
+export type PoiKind = keyof typeof POI_KIND_META;
+
+/**
  * Roads and buildings carry no data value — they are there so a hex can be
  * placed against a street and a footprint. Muted ink, never a series hue, so
  * they cannot be mistaken for an encoded category.
@@ -397,11 +433,11 @@ export const TILE_LAYERS: readonly TileLayerSpec[] = [
               ["linear"],
               ["zoom"],
               10,
-              9,
               13,
-              12,
+              13,
               17,
-              18,
+              17,
+              25,
             ],
           },
         },
@@ -424,6 +460,16 @@ export const TILE_LAYERS: readonly TileLayerSpec[] = [
  * added. Duplicating the value here would let the slider and the first paint
  * disagree.
  */
+
+/**
+ * Hover target for the POI info card.
+ *
+ * The glow, not the dot: at z10 the dot is a 3.5px target and the glow is
+ * 13px, and feature queries use the circle's radius rather than the blur
+ * falloff, so this is a genuinely easier thing to point at. The dot sits
+ * inside the glow, so aiming at the dot still hits.
+ */
+export const POI_HOVER_LAYER_ID = "wh-poi-glow";
 
 /**
  * Id of the lowest MapLibre layer a spec contributes — an underlay when it has

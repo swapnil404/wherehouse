@@ -5,6 +5,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   CircleAlertIcon,
   LoaderCircleIcon,
+  MapPinIcon,
   TriangleAlertIcon,
 } from "lucide-react";
 import maplibregl from "maplibre-gl";
@@ -43,6 +44,9 @@ import {
 import { computeGridAnalytics } from "@/lib/score-analytics";
 import { useDebouncedValue } from "@/lib/use-debounced-value";
 import {
+  POI_COLORS,
+  POI_HOVER_LAYER_ID,
+  POI_KIND_META,
   PMTILES_BASE_URL,
   TILE_LAYERS,
   archiveUrl,
@@ -67,6 +71,71 @@ const BASEMAP_STYLE =
 const EMPTY_CELLS: HeatmapCell[] = [];
 const EMPTY_HOTSPOT_CELLS: HotspotCell[] = [];
 const EMPTY_UNDERSERVED: UnderservedCell[] = [];
+
+/**
+ * POI names come from OpenStreetMap, so they are arbitrary user-contributed
+ * strings that reach `setHTML` — "Sammie's" is harmless, a name containing
+ * angle brackets is not. Everything interpolated into popup markup goes
+ * through here.
+ */
+function escapeHtml(value: unknown): string {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+/** `restaurant` / `car_repair` as written by the classifier, made readable. */
+function humanize(value: unknown): string {
+  const text = String(value ?? "").replaceAll("_", " ").trim();
+  return text ? text[0].toUpperCase() + text.slice(1) : "";
+}
+
+const POI_KIND_COLOR: Record<string, string> = {
+  competitor: POI_COLORS.competitor,
+  complementary: POI_COLORS.complementary,
+  anchor: POI_COLORS.anchor,
+};
+
+/**
+ * Role block for the hover card: the label, what it means, and the OSM tags
+ * behind it. A bare "Complementary" is jargon — it names a category without
+ * saying what qualifies for it, which is the one thing a reader hovering a
+ * dot wants to know.
+ *
+ * Three stacked lines rather than label and definition side by side. Inline,
+ * the definition is a flex sibling that wraps inside its own box, so a long
+ * one breaks mid-phrase and leaves its separator stranded against a
+ * vertically centred label. Only the swatch row is flex; everything below it
+ * is indented by the swatch's width so the text edges line up.
+ */
+const SWATCH_INDENT = "padding-left:14px";
+
+function poiRoleHtml(kind: unknown): string {
+  const key = String(kind ?? "");
+  const meta = key in POI_KIND_META ? POI_KIND_META[key as keyof typeof POI_KIND_META] : null;
+  const swatch = POI_KIND_COLOR[key] ?? "#898781";
+  const label = meta ? meta.label : humanize(key) || "Unclassified";
+
+  const swatchRow = `<div style="display:flex;align-items:center;gap:6px">
+        <span style="width:8px;height:8px;border-radius:2px;background:${swatch};flex:none"></span>
+        <span style="font-size:11px;font-weight:600;color:#ffffff">${escapeHtml(label)}</span>
+      </div>`;
+
+  // The archive only carries the three classified roles, so a missing entry
+  // is a guard against a rebuilt archive rather than an expected branch.
+  if (!meta) return swatchRow;
+
+  return `${swatchRow}
+      <div style="${SWATCH_INDENT};margin-top:2px;font-size:11px;line-height:1.4;color:#c3c2b7">
+        ${escapeHtml(meta.definition)}
+      </div>
+      <div style="${SWATCH_INDENT};margin-top:3px;font-size:10px;line-height:1.35;color:#898781">
+        ${escapeHtml(meta.examples)}
+      </div>`;
+}
 
 /** Shared by every tooltip the overlay renders, so they cannot drift apart. */
 const TOOLTIP_STYLE = {
@@ -137,6 +206,12 @@ export default function MapCanvas() {
   const scorePoint = useMutation(trpc.geo.score.mutationOptions());
   const scorePointRef = useRef(scorePoint.mutate);
   const selectedPointRef = useRef<{ lat: number; lon: number } | null>(null);
+  /**
+   * True while a POI card is open. The score hexes are pickable, so without
+   * this a POI hover would show deck's hex tooltip and the POI popup at the
+   * same time, in two different corners of the cursor.
+   */
+  const poiHoveredRef = useRef(false);
   scorePointRef.current = scorePoint.mutate;
 
   // Weight-independent subscores: the grid is fetched once per preset and the
@@ -262,6 +337,59 @@ export default function MapCanvas() {
     );
     map.getCanvas().style.cursor = "crosshair";
 
+    /**
+     * POI hover card.
+     *
+     * The dots are a MapLibre circle layer rather than a deck layer, so they
+     * are invisible to deck's `getTooltip` and need their own wiring. The card
+     * is anchored to the POI's own coordinates instead of the pointer, so it
+     * reads as belonging to that dot rather than trailing the cursor.
+     */
+    function attachPoiHover(target: maplibregl.Map) {
+      const popup = new maplibregl.Popup({
+        closeButton: false,
+        closeOnClick: false,
+        offset: 14,
+        className: "wh-map-popup",
+        maxWidth: "280px",
+      });
+
+      target.on("mousemove", POI_HOVER_LAYER_ID, (event) => {
+        const feature = event.features?.[0];
+        if (!feature || feature.geometry.type !== "Point") return;
+
+        poiHoveredRef.current = true;
+        target.getCanvas().style.cursor = "pointer";
+
+        const { name, poi_kind: kind, poi_type: type } = feature.properties ?? {};
+
+        popup
+          .setLngLat(feature.geometry.coordinates as [number, number])
+          .setHTML(
+            `<div style="min-width:180px">
+               <div style="font-weight:600;line-height:1.3">${
+                 escapeHtml(name) || "Unnamed"
+               }</div>
+               ${
+                 type
+                   ? `<div style="margin-top:1px;font-size:11px;color:#898781">${escapeHtml(humanize(type))}</div>`
+                   : ""
+               }
+               <div style="margin-top:8px">${poiRoleHtml(kind)}</div>
+             </div>`,
+          )
+          .addTo(target);
+      });
+
+      target.on("mouseleave", POI_HOVER_LAYER_ID, () => {
+        poiHoveredRef.current = false;
+        // Back to the map's own cursor, not `""` — the whole canvas is a
+        // crosshair because clicking anywhere scores that point.
+        target.getCanvas().style.cursor = "crosshair";
+        popup.remove();
+      });
+    }
+
     map.on("load", () => {
       // The basemap's first symbol layer is where its labels begin. Everything
       // we add goes below it, so street and place names stay on top of both
@@ -298,6 +426,8 @@ export default function MapCanvas() {
             map.addLayer(initialStyle, labelStart);
           }
         }
+
+        attachPoiHover(map);
       }
 
       // Hexes go below the first overlay, which puts the stack, bottom to top:
@@ -336,6 +466,8 @@ export default function MapCanvas() {
       getTooltip: (info) => {
         const { object, layer } = info;
         if (!object) return null;
+        // The POI card wins: it is the more specific thing under the cursor.
+        if (poiHoveredRef.current) return null;
 
         if (layer?.id === "underserved-cells") {
           const cell = object as UnderservedCell;
@@ -621,10 +753,12 @@ export default function MapCanvas() {
       <div ref={containerRef} className="h-full w-full" />
 
       {/* Bottom-centred, clear of the top cluster (preset picker, score panel)
-          and of MapLibre's own controls at bottom-left and bottom-right. */}
-      {heatmap.visible ? (
-        <div className="pointer-events-none absolute inset-x-0 bottom-8 flex justify-center">
-          {loading ? (
+          and of MapLibre's own controls at bottom-left and bottom-right.
+          A column so the grid notice and the POI hint stack instead of
+          landing on top of each other when both apply. */}
+      <div className="pointer-events-none absolute inset-x-0 bottom-8 flex flex-col items-center gap-1.5">
+        {heatmap.visible ? (
+          loading ? (
             <p className="flex items-center gap-1.5 rounded-full border border-border bg-card/90 px-3 py-1.5 text-xs text-muted-foreground backdrop-blur">
               <LoaderCircleIcon className="size-3.5 shrink-0 animate-spin" />
               Loading {PRESET_LABELS[preset]} grid…
@@ -641,9 +775,21 @@ export default function MapCanvas() {
                 ? "No cells pass every constraint under this preset"
                 : "No scored cells to draw"}
             </p>
-          ) : null}
-        </div>
-      ) : null}
+          ) : null
+        ) : null}
+
+        {/* POIs are individual premises, not an area wash, and the archive
+            thins them hard at low zoom — so the layer reads as almost empty
+            on the opening view even though it is working. Saying so beats
+            letting it look broken. */}
+        {mapLayers.poi.visible ? (
+          <p className="flex items-center gap-1.5 rounded-full border border-border bg-card/90 px-3 py-1.5 text-xs text-muted-foreground backdrop-blur">
+            <MapPinIcon className="size-3.5 shrink-0" />
+            Points of interest are individual local places — zoom in and pan to
+            see more of them
+          </p>
+        ) : null}
+      </div>
 
       <ScorePanel
         isPending={scorePoint.isPending}

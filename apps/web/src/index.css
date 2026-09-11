@@ -46,3 +46,37 @@
     background: transparent;
   }
 }
+
+/**
+ * Dark card for MapLibre popups — currently the POI hover info.
+ *
+ * MapLibre ships its popup as an opaque white rounded box, which reads as a
+ * foreign element over the dark-matter basemap. These values match the deck.gl
+ * tooltip built in `map-canvas.tsx` so the two kinds of floating card on the
+ * map are indistinguishable to the reader.
+ *
+ * The tip is hidden rather than recolored: MapLibre draws it with per-anchor
+ * border tricks, so tinting it correctly means overriding eight anchor
+ * variants. The card carries a 14px offset instead, which reads as attached
+ * to the point without needing an arrow.
+ */
+.wh-map-popup .maplibregl-popup-content {
+  background: #1a1a19;
+  color: #ffffff;
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-radius: 8px;
+  padding: 10px 12px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.45);
+  font-size: 12px;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.wh-map-popup .maplibregl-popup-tip {
+  display: none;
+}
+
+/* The card is informational and follows the cursor's target, so it must never
+   swallow a click meant for the map underneath. */
+.wh-map-popup {
+  pointer-events: none;
+}

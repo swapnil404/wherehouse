@@ -67,7 +67,10 @@ const UNDERSERVED_RGB: [number, number, number] = [165, 43, 180];
  * outline doing the work for them.
  */
 const REGION_FILL_ALPHA = 38;
-const UNDERSERVED_FILL_ALPHA = 90;
+// Brighter than the cluster tint. Underserved cells are the finding itself
+// rather than a boundary around one, so they have to hold their own against
+// the score wash underneath instead of deferring to it.
+const UNDERSERVED_FILL_ALPHA = 125;
 
 export const HOT_LINE: [number, number, number, number] = [...HOT_RGB, 255];
 export const COLD_LINE: [number, number, number, number] = [...COLD_RGB, 255];
