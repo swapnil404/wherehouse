@@ -42,6 +42,20 @@ export interface TileLayerSpec {
   /** The paint property the rail's opacity slider drives. */
   opacityProperty: "fill-opacity" | "line-opacity" | "circle-opacity";
   /**
+   * Extra paint passes drawn *underneath* `style`, bottom-first.
+   *
+   * One rail row can therefore be more than one MapLibre layer — the POI dots
+   * plus the glow behind them — while a single toggle and a single opacity
+   * slider still drive the whole thing. `opacityScale` is multiplied into the
+   * slider value, which is what keeps a halo behind its dot at every setting
+   * instead of only at 100%.
+   */
+  underlays?: {
+    spec: CircleLayerSpecification | FillLayerSpecification | LineLayerSpecification;
+    opacityProperty: "fill-opacity" | "line-opacity" | "circle-opacity";
+    opacityScale: number;
+  }[];
+  /**
    * Seeds the store's slider and the style's initial paint value, so the two
    * cannot drift. Fills sit lower than line work: a wash has to let the score
    * hexes underneath read through it, a hairline does not.
@@ -94,6 +108,42 @@ export const POI_COLORS = {
   complementary: "#45b98c",
   anchor: "#f0b95a",
 } as const;
+
+/**
+ * What the three roles actually mean, transcribed from `_poi_kind` in
+ * `pipeline/src/wherehouse_pipeline/build.py`. `examples` lists the real OSM
+ * tag values that classifier matches on — not a paraphrase.
+ *
+ * Two things the reader has to be told, because the labels imply otherwise:
+ *
+ * 1. The classification is fixed at ingestion from OSM tags alone. It does
+ *    *not* vary with the active preset, so "Competitor" means an industrial
+ *    or warehouse site whether the user is looking at warehouse, retail or
+ *    EV. Under the EV preset especially that is not a competing charger, and
+ *    there is no charger-supply data anywhere in this dataset.
+ * 2. The classifier's fourth bucket, `other`, is excluded from the archive
+ *    entirely, so these three are the whole layer rather than a selection
+ *    from it.
+ */
+export const POI_KIND_META = {
+  competitor: {
+    label: "Competitor",
+    definition: "Warehouse or industrial site",
+    examples: "building=warehouse/industrial, landuse=industrial/logistics",
+  },
+  complementary: {
+    label: "Complementary",
+    definition: "Everyday service or trade supply",
+    examples: "Fuel, bank, restaurant, cafe, convenience, hardware, trade",
+  },
+  anchor: {
+    label: "Anchor",
+    definition: "Large footfall generator",
+    examples: "Hospital, university, marketplace, mall, supermarket, department store",
+  },
+} as const;
+
+export type PoiKind = keyof typeof POI_KIND_META;
 
 /**
  * Roads and buildings carry no data value — they are there so a hex can be
@@ -320,16 +370,20 @@ export const TILE_LAYERS: readonly TileLayerSpec[] = [
           POI_COLORS.anchor,
           "#898781",
         ],
+        // Was 2px at z10, which is a single pixel of color once the dark
+        // stroke is drawn over it — effectively invisible at the zoom the
+        // map opens on. The glow underlay does most of the work of making
+        // these findable; the dot only has to stay crisp.
         "circle-radius": [
           "interpolate",
           ["linear"],
           ["zoom"],
           10,
-          2,
+          3.5,
           13,
-          4,
+          5,
           17,
-          7,
+          8,
         ],
         "circle-stroke-color": "#0e0e0e",
         "circle-stroke-width": [
@@ -343,11 +397,59 @@ export const TILE_LAYERS: readonly TileLayerSpec[] = [
         ],
       },
     },
+    // A blurred, larger, dimmer copy of each dot drawn underneath it. Points
+    // this small lose against a dark basemap and a score wash; a soft halo
+    // gives them enough area to register without inflating the dot itself,
+    // which would start merging neighbours into blobs.
+    underlays: [
+      {
+        opacityProperty: "circle-opacity",
+        // Faint on purpose. At full strength the halos read as the data and
+        // the dots as noise inside them, which inverts the encoding.
+        opacityScale: 0.3,
+        spec: {
+          id: "wh-poi-glow",
+          type: "circle",
+          source: "wh-poi",
+          "source-layer": "poi",
+          minzoom: 10,
+          paint: {
+            "circle-color": [
+              "match",
+              ["get", "poi_kind"],
+              "competitor",
+              POI_COLORS.competitor,
+              "complementary",
+              POI_COLORS.complementary,
+              "anchor",
+              POI_COLORS.anchor,
+              "#898781",
+            ],
+            // `circle-blur` of 1 fades the edge across the whole radius, so
+            // this reads as a glow rather than a second flat ring.
+            "circle-blur": 1,
+            "circle-radius": [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              10,
+              13,
+              13,
+              17,
+              17,
+              25,
+            ],
+          },
+        },
+      },
+    ],
     legend: [
       { label: "Competitor", hex: POI_COLORS.competitor },
       { label: "Complementary", hex: POI_COLORS.complementary },
       { label: "Anchor", hex: POI_COLORS.anchor },
     ],
+    // The archive itself starts at z10, so this is a property of the data and
+    // not of the style — it cannot be lowered without a rebuild.
     hint: "Visible from zoom 10",
   },
 ] as const;
@@ -358,6 +460,37 @@ export const TILE_LAYERS: readonly TileLayerSpec[] = [
  * added. Duplicating the value here would let the slider and the first paint
  * disagree.
  */
+
+/**
+ * Hover target for the POI info card.
+ *
+ * The glow, not the dot: at z10 the dot is a 3.5px target and the glow is
+ * 13px, and feature queries use the circle's radius rather than the blur
+ * falloff, so this is a genuinely easier thing to point at. The dot sits
+ * inside the glow, so aiming at the dot still hits.
+ */
+export const POI_HOVER_LAYER_ID = "wh-poi-glow";
+
+/**
+ * Id of the lowest MapLibre layer a spec contributes — an underlay when it has
+ * one, otherwise the primary style. The score hexes anchor to this, so it has
+ * to be the true bottom of the stack rather than just `style.id`.
+ */
+export function bottomLayerId(layer: TileLayerSpec): string {
+  return layer.underlays?.[0]?.spec.id ?? layer.style.id;
+}
+
+/** Every MapLibre layer a spec contributes, bottom-first. */
+export function styleLayersOf(layer: TileLayerSpec) {
+  return [
+    ...(layer.underlays ?? []).map((u) => ({
+      spec: u.spec,
+      opacityProperty: u.opacityProperty,
+      opacityScale: u.opacityScale,
+    })),
+    { spec: layer.style, opacityProperty: layer.opacityProperty, opacityScale: 1 },
+  ];
+}
 
 /** URL for MapLibre's `pmtiles://` protocol handler. */
 export function archiveUrl(layer: TileLayerSpec): string {

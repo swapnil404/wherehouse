@@ -24,7 +24,7 @@ import { authClient } from "@/lib/auth-client";
 
 import { authForm } from "./auth-form-styles";
 import GoogleSignInButton from "./google-sign-in-button";
-import Loader from "./loader";
+import { AuthCardSkeleton } from "./loader";
 
 export function LoginForm({
   onSwitchToSignUp,
@@ -69,16 +69,16 @@ export function LoginForm({
   });
 
   if (isPending) {
-    return <Loader />;
+    return <AuthCardSkeleton />;
   }
 
   return (
     <div className={cn("flex flex-col gap-6", className)} {...props}>
       <Card className={authForm.card}>
         <CardHeader>
-          <CardTitle className={authForm.title}>Login to your account</CardTitle>
+          <CardTitle className={authForm.title}>Sign in</CardTitle>
           <CardDescription className={authForm.description}>
-            Enter your email below to login to your account
+            Score a site anywhere in Austin.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -114,17 +114,9 @@ export function LoginForm({
               <form.Field name="password">
                 {(field) => (
                   <Field data-invalid={field.state.meta.errors.length > 0 || undefined}>
-                    <div className="flex items-center">
-                      <FieldLabel className={authForm.label} htmlFor={field.name}>
-                        Password
-                      </FieldLabel>
-                      <a
-                        href="#"
-                        className="ml-auto inline-block text-sm underline-offset-4 hover:underline"
-                      >
-                        Forgot your password?
-                      </a>
-                    </div>
+                    <FieldLabel className={authForm.label} htmlFor={field.name}>
+                      Password
+                    </FieldLabel>
                     <Input
                       id={field.name}
                       name={field.name}
@@ -152,21 +144,21 @@ export function LoginForm({
                       className={authForm.button}
                       disabled={!canSubmit || isSubmitting}
                     >
-                      {isSubmitting ? "Submitting..." : "Login"}
+                      {isSubmitting ? "Signing in…" : "Sign in"}
                     </Button>
                   )}
                 </form.Subscribe>
 
-                <GoogleSignInButton label="Login with Google" className={authForm.button} />
+                <GoogleSignInButton label="Continue with Google" className={authForm.button} />
 
                 <FieldDescription className={cn("text-center", authForm.footnote)}>
                   Don&apos;t have an account?{" "}
                   <button
                     type="button"
                     onClick={onSwitchToSignUp}
-                    className="underline underline-offset-4"
+                    className="rounded-sm font-medium text-primary underline-offset-4 hover:underline focus-visible:ring-1 focus-visible:ring-ring/50 focus-visible:outline-none"
                   >
-                    Sign up
+                    Create one
                   </button>
                 </FieldDescription>
               </Field>

@@ -1,13 +1,26 @@
 import { PRESET_LABELS, type PresetName } from "@/lib/cells";
 import { useMapStore } from "@/stores/map-store";
 
+import { panelSurface, segment } from "./panel-styles";
+
 /**
- * Floating use-case switcher, centred over the top of the map.
+ * Floating use-case switcher, top-left of the map.
  *
  * Sits on the map rather than in the rail because it reframes the entire
  * view — switching from warehouse to retail inverts the heatmap — so it reads
  * as a mode control for the whole canvas, not one setting among the layer
  * toggles.
+ *
+ * Left rather than centred. Centred, it ran into the results card on any
+ * screen under about 1100px: a ~280px picker in the middle and a 288px card
+ * on the right need roughly 620px of map between them, and a centred element
+ * spends its width on both sides of the midpoint. Anchored left, the two
+ * cannot meet until the map is narrower than either of them.
+ *
+ * Positioning belongs to `map-view`, which stacks this above the layers
+ * button in one top-left column. Both are "what am I looking at" controls,
+ * so they read as a pair rather than as two unrelated things that happen to
+ * share a corner.
  *
  * Full labels here, unlike the cramped rail: floating over the map there is
  * room for "EV charging" rather than "EV".
@@ -22,31 +35,25 @@ export default function PresetPicker() {
   const available = presets ? (Object.keys(presets) as PresetName[]) : [preset];
 
   return (
-    <div className="pointer-events-none absolute inset-x-0 top-4 z-10 flex justify-center">
-      <div
-        role="group"
-        aria-label="Scoring use case"
-        className="pointer-events-auto flex gap-1 rounded-lg border border-border bg-card/95 p-1 shadow-xl backdrop-blur"
-      >
-        {available.map((name) => {
-          const active = name === preset;
-          return (
-            <button
-              key={name}
-              type="button"
-              aria-pressed={active}
-              onClick={() => setPreset(name)}
-              className={
-                active
-                  ? "rounded-md bg-background px-3 py-1.5 text-xs font-medium shadow-sm"
-                  : "rounded-md px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
-              }
-            >
-              {PRESET_LABELS[name] ?? name}
-            </button>
-          );
-        })}
-      </div>
+    <div
+      role="group"
+      aria-label="Scoring use case"
+      className={`pointer-events-auto flex gap-1 p-1 ${panelSurface}`}
+    >
+      {available.map((name) => {
+        const active = name === preset;
+        return (
+          <button
+            key={name}
+            type="button"
+            aria-pressed={active}
+            onClick={() => setPreset(name)}
+            className={`${segment.base} ${active ? segment.active : segment.inactive}`}
+          >
+            {PRESET_LABELS[name] ?? name}
+          </button>
+        );
+      })}
     </div>
   );
 }

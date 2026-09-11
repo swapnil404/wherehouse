@@ -1,16 +1,19 @@
 import { H3HexagonLayer } from "@deck.gl/geo-layers";
+import { PolygonLayer } from "@deck.gl/layers";
 import { MapboxOverlay } from "@deck.gl/mapbox";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   CircleAlertIcon,
   LoaderCircleIcon,
+  MapPinIcon,
   TriangleAlertIcon,
 } from "lucide-react";
+import { cellToLatLng } from "h3-js";
 import maplibregl from "maplibre-gl";
 import { Protocol } from "pmtiles";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import ScorePanel from "./score-panel";
+import { panelPill } from "./panel-styles";
 import {
   PRESET_LABELS,
   SUBSCORE_KEYS,
@@ -26,10 +29,33 @@ import {
   binIndexForScore,
   colorForScore,
 } from "@/lib/heatmap-palette";
+import {
+  COLD_FILL,
+  COLD_LINE,
+  HOT_FILL,
+  HOT_LINE,
+  UNDERSERVED_FILL,
+  UNDERSERVED_LINE,
+  buildRegions,
+  countByClassification,
+  type HotspotCell,
+  type HotspotRegion,
+  type UnderservedCell,
+} from "@/lib/hotspots";
 import { computeGridAnalytics } from "@/lib/score-analytics";
-import { PMTILES_BASE_URL, TILE_LAYERS, archiveUrl } from "@/lib/tile-layers";
+import { useDebouncedValue } from "@/lib/use-debounced-value";
+import {
+  POI_COLORS,
+  POI_HOVER_LAYER_ID,
+  POI_KIND_META,
+  PMTILES_BASE_URL,
+  TILE_LAYERS,
+  archiveUrl,
+  bottomLayerId,
+  styleLayersOf,
+} from "@/lib/tile-layers";
 import { useMapStore } from "@/stores/map-store";
-import { useTRPC } from "@/utils/trpc";
+import { useTRPC, useTRPCClient } from "@/utils/trpc";
 
 /**
  * MapLibre touches `window` at import time, so this module must only ever be
@@ -40,10 +66,98 @@ import { useTRPC } from "@/utils/trpc";
 const AUSTIN = { lng: -97.7431, lat: 30.2672 };
 
 /** CARTO dark matter — free, no API key, OSM-attributed. */
+/**
+ * How many rows the shortlist carries.
+ *
+ * The grid is about a thousand cells. A shortlist exists to stop the reader
+ * scanning, so it has to end well before the eye gives up; past roughly
+ * thirty rows it is just the grid again in a narrower column.
+ */
+const RANKED_LIMIT = 25;
+
 const BASEMAP_STYLE =
   "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
 
 const EMPTY_CELLS: HeatmapCell[] = [];
+const EMPTY_HOTSPOT_CELLS: HotspotCell[] = [];
+const EMPTY_UNDERSERVED: UnderservedCell[] = [];
+
+/**
+ * POI names come from OpenStreetMap, so they are arbitrary user-contributed
+ * strings that reach `setHTML` — "Sammie's" is harmless, a name containing
+ * angle brackets is not. Everything interpolated into popup markup goes
+ * through here.
+ */
+function escapeHtml(value: unknown): string {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+/** `restaurant` / `car_repair` as written by the classifier, made readable. */
+function humanize(value: unknown): string {
+  const text = String(value ?? "").replaceAll("_", " ").trim();
+  return text ? text[0].toUpperCase() + text.slice(1) : "";
+}
+
+const POI_KIND_COLOR: Record<string, string> = {
+  competitor: POI_COLORS.competitor,
+  complementary: POI_COLORS.complementary,
+  anchor: POI_COLORS.anchor,
+};
+
+/**
+ * Role block for the hover card: the label, what it means, and the OSM tags
+ * behind it. A bare "Complementary" is jargon — it names a category without
+ * saying what qualifies for it, which is the one thing a reader hovering a
+ * dot wants to know.
+ *
+ * Three stacked lines rather than label and definition side by side. Inline,
+ * the definition is a flex sibling that wraps inside its own box, so a long
+ * one breaks mid-phrase and leaves its separator stranded against a
+ * vertically centred label. Only the swatch row is flex; everything below it
+ * is indented by the swatch's width so the text edges line up.
+ */
+const SWATCH_INDENT = "padding-left:14px";
+
+function poiRoleHtml(kind: unknown): string {
+  const key = String(kind ?? "");
+  const meta = key in POI_KIND_META ? POI_KIND_META[key as keyof typeof POI_KIND_META] : null;
+  const swatch = POI_KIND_COLOR[key] ?? "var(--muted-foreground)";
+  const label = meta ? meta.label : humanize(key) || "Unclassified";
+
+  const swatchRow = `<div style="display:flex;align-items:center;gap:6px">
+        <span style="width:8px;height:8px;border-radius:2px;background:${swatch};flex:none"></span>
+        <span style="font-size:11px;font-weight:600;color:var(--popover-foreground)">${escapeHtml(label)}</span>
+      </div>`;
+
+  // The archive only carries the three classified roles, so a missing entry
+  // is a guard against a rebuilt archive rather than an expected branch.
+  if (!meta) return swatchRow;
+
+  return `${swatchRow}
+      <div style="${SWATCH_INDENT};margin-top:2px;font-size:11px;line-height:1.4;color:color-mix(in oklab, var(--popover-foreground) 76%, transparent)">
+        ${escapeHtml(meta.definition)}
+      </div>
+      <div style="${SWATCH_INDENT};margin-top:3px;font-size:10px;line-height:1.35;color:var(--muted-foreground)">
+        ${escapeHtml(meta.examples)}
+      </div>`;
+}
+
+/** Shared by every tooltip the overlay renders, so they cannot drift apart. */
+const TOOLTIP_STYLE = {
+  backgroundColor: "var(--popover)",
+  color: "var(--popover-foreground)",
+  border: "1px solid var(--border)",
+  borderRadius: "var(--radius-md)",
+  padding: "10px 12px",
+  fontSize: "12px",
+  fontFamily: "var(--font-sans)",
+  boxShadow: "0 16px 40px -16px rgba(0,0,0,0.8)",
+};
 
 /**
  * `addProtocol` registers globally on maplibre, not per map, so this runs once
@@ -64,17 +178,37 @@ function registerPMTilesProtocol() {
 }
 
 /**
- * Where deck's hexes get inserted into the basemap's layer stack.
+ * Where deck's layers get inserted into the basemap's layer stack.
  *
- * `null` means the style is not ready yet. `{ beforeId: undefined }` means it
- * is ready but nothing was found to anchor against, so deck draws on top —
- * which is the old overlaid behaviour and a safe fallback rather than a crash.
+ * Two anchors, because the hexes and the analysis overlays belong at different
+ * depths: the score heatmap sits *under* the PMTiles overlays, while clusters
+ * and underserved areas are findings drawn on top of everything but the
+ * basemap's labels.
+ *
+ * `null` means the style is not ready yet. An `undefined` id means it is ready
+ * but nothing was found to anchor against, so deck draws on top — the old
+ * overlaid behaviour, and a safe fallback rather than a crash.
  */
-type DeckAnchor = { beforeId: string | undefined } | null;
+type DeckAnchor = {
+  hexBeforeId: string | undefined;
+  analysisBeforeId: string | undefined;
+} | null;
 
 export default function MapCanvas() {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
+  /**
+   * Where the zoom control is mounted.
+   *
+   * MapLibre only offers four control positions, all corners, and the zoom
+   * bar is wanted bottom-centre. Rather than reimplement it, the control is
+   * instantiated directly and its element appended here: `onAdd` returns the
+   * DOM node and `onRemove` tears it down, which is the whole of the
+   * `IControl` contract. That keeps the parts worth keeping, notably the
+   * compass, the pitch visualisation and the buttons disabling themselves at
+   * the style's zoom limits, while this component owns the placement.
+   */
+  const zoomHostRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<MapboxOverlay | null>(null);
   const [deckAnchor, setDeckAnchor] = useState<DeckAnchor>(null);
 
@@ -87,9 +221,25 @@ export default function MapCanvas() {
   const setPresets = useMapStore((s) => s.setPresets);
   const customWeights = useMapStore((s) => s.customWeights);
 
+  const hotspotParams = useMapStore((s) => s.hotspotParams);
+  const setHotspotStats = useMapStore((s) => s.setHotspotStats);
+  const setHotspotStatus = useMapStore((s) => s.setHotspotStatus);
+  const analysisOn = mapLayers.hotspots.visible || mapLayers.underserved.visible;
+
+  const setRankedCells = useMapStore((s) => s.setRankedCells);
+  const setSelection = useMapStore((s) => s.setSelection);
+  const pendingFocusH3 = useMapStore((s) => s.pendingFocusH3);
+  const clearPendingFocus = useMapStore((s) => s.clearPendingFocus);
+
   const scorePoint = useMutation(trpc.geo.score.mutationOptions());
   const scorePointRef = useRef(scorePoint.mutate);
   const selectedPointRef = useRef<{ lat: number; lon: number } | null>(null);
+  /**
+   * True while a POI card is open. The score hexes are pickable, so without
+   * this a POI hover would show deck's hex tooltip and the POI popup at the
+   * same time, in two different corners of the cursor.
+   */
+  const poiHoveredRef = useRef(false);
   scorePointRef.current = scorePoint.mutate;
 
   // Weight-independent subscores: the grid is fetched once per preset and the
@@ -113,6 +263,55 @@ export default function MapCanvas() {
   const weights = customWeights ?? presetWeights ?? ({} as Weights);
   const weightsReady = Object.keys(weights).length > 0;
 
+  // Gi* and DBSCAN run server-side across the whole grid, so unlike the
+  // heatmap they cannot be recomputed in the browser when a weight moves.
+  // Debouncing the value the request is keyed on keeps the heatmap instant
+  // while the clusters catch up after the drag settles, instead of firing one
+  // round trip per pointer move.
+  const debouncedWeights = useDebouncedValue(customWeights, 400);
+  const trpcClient = useTRPCClient();
+  const hotspotsQuery = useQuery({
+    queryKey: ["geo.hotspots", preset, hotspotParams, debouncedWeights],
+    // `geo.hotspots` is declared a tRPC mutation because it POSTs upstream,
+    // but it is a pure read. Driving it through the vanilla client inside a
+    // query buys caching and — the reason it matters here — makes React Query
+    // discard responses whose parameters are already stale, so a slow request
+    // for one threshold cannot land on top of a fast one for the next.
+    queryFn: () =>
+      trpcClient.geo.hotspots.mutate({
+        preset,
+        method: hotspotParams.method,
+        k: hotspotParams.k,
+        threshold: hotspotParams.threshold,
+        eps_km: hotspotParams.epsKm,
+        min_samples: hotspotParams.minSamples,
+        weights: debouncedWeights ?? undefined,
+      }),
+    // Only fetched once an analysis layer is actually switched on: it is the
+    // most expensive call the map makes, and most sessions never open it.
+    enabled: analysisOn,
+    staleTime: Infinity,
+  });
+
+  // The panel and the map both need to distinguish "working" and "failed"
+  // from "found nothing", and neither can read the query from here.
+  const hotspotError = hotspotsQuery.error;
+  useEffect(() => {
+    setHotspotStatus({
+      pending: analysisOn && hotspotsQuery.isPending,
+      error: hotspotError ? hotspotError.message : null,
+    });
+  }, [analysisOn, hotspotsQuery.isPending, hotspotError, setHotspotStatus]);
+
+  const hotspotCells = (hotspotsQuery.data?.cells ?? EMPTY_HOTSPOT_CELLS) as HotspotCell[];
+  const underservedCells = (hotspotsQuery.data?.underserved ??
+    EMPTY_UNDERSERVED) as UnderservedCell[];
+
+  const regions = useMemo(
+    () => buildRegions(hotspotCells, hotspotParams.method),
+    [hotspotCells, hotspotParams.method],
+  );
+
   // Publish the preset payload for the rail. Keys are narrowed against the
   // known labels so an unrecognized preset never becomes a button the client
   // cannot render.
@@ -129,6 +328,43 @@ export default function MapCanvas() {
     () => (eligibleOnly ? cells.filter((cell) => cell.eligible) : cells),
     [cells, eligibleOnly],
   );
+
+  /**
+   * Top of the grid under the live weights.
+   *
+   * Ranked over `visibleCells`, so the "only workable sites" filter narrows
+   * the shortlist exactly as it narrows the map. Capped: past about thirty
+   * rows the list stops being a shortlist and the reader is back to scanning.
+   */
+  const rankedCells = useMemo(() => {
+    const scored: { h3Index: string; score: number; eligible: boolean }[] = [];
+    for (const cell of visibleCells) {
+      const score = compositeScore(cell.subscores, weights);
+      if (score != null) {
+        scored.push({ h3Index: cell.h3Index, score, eligible: cell.eligible });
+      }
+    }
+    scored.sort((a, b) => b.score - a.score);
+    return scored.slice(0, RANKED_LIMIT);
+  }, [visibleCells, weights]);
+
+  useEffect(() => {
+    setRankedCells(rankedCells.length > 0 ? rankedCells : null);
+  }, [rankedCells, setRankedCells]);
+
+  // The dock renders outside this client-only subtree, so the mutation's
+  // state has to reach it through the store.
+  useEffect(() => {
+    if (!scorePoint.isPending && !scorePoint.error && !scorePoint.data) {
+      setSelection(null);
+      return;
+    }
+    setSelection({
+      isPending: scorePoint.isPending,
+      error: scorePoint.error ? { message: scorePoint.error.message } : null,
+      cell: scorePoint.data ?? null,
+    });
+  }, [scorePoint.isPending, scorePoint.error, scorePoint.data, setSelection]);
 
   const selectedData = useMemo(() => {
     if (!scorePoint.data) return null;
@@ -148,6 +384,30 @@ export default function MapCanvas() {
     scorePointRef.current({ point, preset });
   }, [preset]);
 
+  /**
+   * A shortlist row was clicked: centre that cell and score it.
+   *
+   * Scored through the same mutation as a map click, from the cell's own
+   * centroid, so the panel cannot disagree with the row that opened it.
+   * `flyTo` is skipped under reduced motion, which would otherwise pan the
+   * whole viewport for a second on every row click.
+   */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!pendingFocusH3 || !map) return;
+
+    const [lat, lon] = cellToLatLng(pendingFocusH3);
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const camera = { center: [lon, lat] as [number, number], zoom: Math.max(map.getZoom(), 12) };
+    if (reduceMotion) map.jumpTo(camera);
+    else map.flyTo({ ...camera, duration: 900 });
+
+    const { preset: activePreset, customWeights: edits } = useMapStore.getState();
+    selectedPointRef.current = { lat, lon };
+    scorePointRef.current({ point: { lat, lon }, preset: activePreset, weights: edits ?? undefined });
+    clearPendingFocus();
+  }, [pendingFocusH3, clearPendingFocus]);
+
   // The tooltip closure is built once with the overlay, so it reads the active
   // preset's weights through a ref rather than capturing a stale value.
   const weightsRef = useRef<Weights>(weights);
@@ -166,15 +426,78 @@ export default function MapCanvas() {
       attributionControl: { compact: true },
     });
 
-    map.addControl(
-      new maplibregl.NavigationControl({ visualizePitch: true }),
-      "top-right",
-    );
-    map.addControl(
-      new maplibregl.ScaleControl({ unit: "metric" }),
-      "bottom-left",
-    );
+    // Bottom-left, beside the score key.
+    //
+    // The whole right edge belongs to the results card, which grows downward
+    // from the top and on the "This site" tab reaches most of the way to the
+    // bottom, so it covered this control there. Bottom-right is the same
+    // edge; the left column is the only side nothing expands into.
+    //
+    // The scale bar is the only thing left in this corner, and it sits in the
+    // very bottom strip, clear of the score key above it. Default `maxWidth`
+    // restored: it was narrowed only to fit beside the key when the zoom bar
+    // shared this corner.
+    map.addControl(new maplibregl.ScaleControl({ unit: "metric" }), "bottom-left");
+
+    // Zoom goes bottom-centre instead, mounted into this component's own node
+    // rather than one of MapLibre's four corner containers. See `zoomHostRef`.
+    const nav = new maplibregl.NavigationControl({ visualizePitch: true });
+    zoomHostRef.current?.appendChild(nav.onAdd(map));
+
     map.getCanvas().style.cursor = "crosshair";
+
+    /**
+     * POI hover card.
+     *
+     * The dots are a MapLibre circle layer rather than a deck layer, so they
+     * are invisible to deck's `getTooltip` and need their own wiring. The card
+     * is anchored to the POI's own coordinates instead of the pointer, so it
+     * reads as belonging to that dot rather than trailing the cursor.
+     */
+    function attachPoiHover(target: maplibregl.Map) {
+      const popup = new maplibregl.Popup({
+        closeButton: false,
+        closeOnClick: false,
+        offset: 14,
+        className: "wh-map-popup",
+        maxWidth: "280px",
+      });
+
+      target.on("mousemove", POI_HOVER_LAYER_ID, (event) => {
+        const feature = event.features?.[0];
+        if (!feature || feature.geometry.type !== "Point") return;
+
+        poiHoveredRef.current = true;
+        target.getCanvas().style.cursor = "pointer";
+
+        const { name, poi_kind: kind, poi_type: type } = feature.properties ?? {};
+
+        popup
+          .setLngLat(feature.geometry.coordinates as [number, number])
+          .setHTML(
+            `<div style="min-width:180px">
+               <div style="font-weight:600;line-height:1.3">${
+                 escapeHtml(name) || "Unnamed"
+               }</div>
+               ${
+                 type
+                   ? `<div style="margin-top:1px;font-size:11px;color:var(--muted-foreground)">${escapeHtml(humanize(type))}</div>`
+                   : ""
+               }
+               <div style="margin-top:8px">${poiRoleHtml(kind)}</div>
+             </div>`,
+          )
+          .addTo(target);
+      });
+
+      target.on("mouseleave", POI_HOVER_LAYER_ID, () => {
+        poiHoveredRef.current = false;
+        // Back to the map's own cursor, not `""` — the whole canvas is a
+        // crosshair because clicking anywhere scores that point.
+        target.getCanvas().style.cursor = "crosshair";
+        popup.remove();
+      });
+    }
 
     map.on("load", () => {
       // The basemap's first symbol layer is where its labels begin. Everything
@@ -192,21 +515,28 @@ export default function MapCanvas() {
             url: archiveUrl(layer),
           });
           const state = useMapStore.getState().layers[layer.id];
-          const initialStyle = {
-            ...layer.style,
-            layout: {
-              ...layer.style.layout,
-              visibility: state.visible ? "visible" : "none",
-            },
-            paint: {
-              ...layer.style.paint,
-              [layer.opacityProperty]: state.opacity,
-            },
-          } as maplibregl.LayerSpecification;
-          // Each insert lands immediately below `labelStart`, so the layers
-          // stack in array order: zoning at the bottom, roads on top.
-          map.addLayer(initialStyle, labelStart);
+          // A rail row can contribute several paint passes (the POI glow sits
+          // under the POI dots). `styleLayersOf` returns them bottom-first,
+          // and each insert lands immediately below `labelStart`, so both the
+          // passes within a layer and the layers themselves stack in array
+          // order: zoning at the bottom, POI dots on top.
+          for (const pass of styleLayersOf(layer)) {
+            const initialStyle = {
+              ...pass.spec,
+              layout: {
+                ...pass.spec.layout,
+                visibility: state.visible ? "visible" : "none",
+              },
+              paint: {
+                ...pass.spec.paint,
+                [pass.opacityProperty]: state.opacity * pass.opacityScale,
+              },
+            } as maplibregl.LayerSpecification;
+            map.addLayer(initialStyle, labelStart);
+          }
         }
+
+        attachPoiHover(map);
       }
 
       // Hexes go below the first overlay, which puts the stack, bottom to top:
@@ -214,7 +544,8 @@ export default function MapCanvas() {
       // overlay to sit under, so they anchor to the label boundary instead —
       // anchoring to a layer that was never added would throw in `addLayer`.
       setDeckAnchor({
-        beforeId: PMTILES_BASE_URL ? TILE_LAYERS[0].style.id : labelStart,
+        hexBeforeId: PMTILES_BASE_URL ? bottomLayerId(TILE_LAYERS[0]) : labelStart,
+        analysisBeforeId: labelStart,
       });
     });
 
@@ -222,6 +553,7 @@ export default function MapCanvas() {
       const { preset: activePreset, customWeights: edits } =
         useMapStore.getState();
       const point = { lat: lngLat.lat, lon: lngLat.lng };
+      useMapStore.getState().setSelectionOrigin("map");
       selectedPointRef.current = point;
       scorePointRef.current({
         point,
@@ -241,16 +573,46 @@ export default function MapCanvas() {
     const overlay = new MapboxOverlay({
       interleaved: true,
       layers: [],
-      getTooltip: ({ object }) => {
-        const cell = object as HeatmapCell | undefined;
-        if (!cell) return null;
+      getTooltip: (info) => {
+        const { object, layer } = info;
+        if (!object) return null;
+        // The POI card wins: it is the more specific thing under the cursor.
+        if (poiHoveredRef.current) return null;
 
+        if (layer?.id === "underserved-cells") {
+          const cell = object as UnderservedCell;
+          // `demand` is population_density_percentile * 100, so it is a rank
+          // against the rest of the grid, not a headcount. Labelled "People
+          // nearby" with a bare number it read as one: "87" looked like 87
+          // residents in a cell covering 0.74 square kilometres. `supply`
+          // really is a count, so it stays bare.
+          return {
+            html: `
+              <div style="min-width:190px">
+                <div style="font-weight:600;margin-bottom:6px">Underserved</div>
+                <div style="display:flex;justify-content:space-between;gap:12px">
+                  <span style="color:var(--muted-foreground)">Population density</span>
+                  <span style="font-family:var(--font-mono);font-variant-numeric:tabular-nums">${cell.demand.toFixed(0)}th pctl</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;gap:12px">
+                  <span style="color:var(--muted-foreground)">Businesses here</span>
+                  <span style="font-family:var(--font-mono);font-variant-numeric:tabular-nums">${cell.supply}</span>
+                </div>
+                <div style="margin-top:6px;font-size:10px;color:var(--muted-foreground)">
+                  General retail and services only
+                </div>
+              </div>`,
+            style: TOOLTIP_STYLE,
+          };
+        }
+
+        const cell = object as HeatmapCell;
         const score = compositeScore(cell.subscores, weightsRef.current);
         const rows = SUBSCORE_KEYS.map(
           (key) =>
             `<div style="display:flex;justify-content:space-between;gap:12px">
-               <span style="color:#898781">${SUBSCORE_LABELS[key]}</span>
-               <span style="font-variant-numeric:tabular-nums">${cell.subscores[key].toFixed(0)}</span>
+               <span style="color:var(--muted-foreground)">${SUBSCORE_LABELS[key]}</span>
+               <span style="font-family:var(--font-mono);font-variant-numeric:tabular-nums">${cell.subscores[key].toFixed(0)}</span>
              </div>`,
         ).join("");
 
@@ -258,26 +620,19 @@ export default function MapCanvas() {
           html: `
             <div style="min-width:190px">
               <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:6px">
-                <span style="font-size:18px;font-weight:600;font-variant-numeric:tabular-nums">
-                  ${score == null ? "—" : score.toFixed(1)}
+                <span style="font-size:18px;font-weight:600;font-family:var(--font-mono);font-variant-numeric:tabular-nums">
+                  ${score == null ? "-" : score.toFixed(1)}
                 </span>
-                <span style="font-size:11px;color:${cell.eligible ? "#0ca30c" : "#d03b3b"}">
-                  ${cell.eligible ? "Eligible" : "Constraints failed"}
+                <span style="font-size:11px;color:${
+                  cell.eligible ? "var(--success)" : "var(--destructive)"
+                }">
+                  ${cell.eligible ? "Workable" : "Breaks a rule"}
                 </span>
               </div>
               ${rows}
-              <div style="margin-top:6px;font-size:10px;color:#898781">${cell.h3Index}</div>
+              <div style="margin-top:6px;font-size:10px;font-family:var(--font-mono);color:var(--muted-foreground)">${cell.h3Index}</div>
             </div>`,
-          style: {
-            backgroundColor: "#1a1a19",
-            color: "#ffffff",
-            border: "1px solid rgba(255,255,255,0.10)",
-            borderRadius: "8px",
-            padding: "10px 12px",
-            fontSize: "12px",
-            fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif",
-            boxShadow: "0 8px 24px rgba(0,0,0,0.45)",
-          },
+          style: TOOLTIP_STYLE,
         };
       },
     });
@@ -288,6 +643,9 @@ export default function MapCanvas() {
 
     return () => {
       overlayRef.current = null;
+      // Before `map.remove()`: the control detaches its own listeners from
+      // the map, and doing that after the map is gone is a needless race.
+      nav.onRemove();
       map.remove();
       mapRef.current = null;
     };
@@ -304,7 +662,8 @@ export default function MapCanvas() {
     // not export the type that adds it. Spread rather than written inline:
     // that is what keeps TypeScript from rejecting it as an excess property,
     // without reaching for `as any` on the whole layer.
-    const placement = { beforeId: deckAnchor.beforeId };
+    const placement = { beforeId: deckAnchor.hexBeforeId };
+    const analysisPlacement = { beforeId: deckAnchor.analysisBeforeId };
 
     return [
       // The heatmap fill is conditional, but the selection ring below is not:
@@ -361,6 +720,55 @@ export default function MapCanvas() {
             }),
           ]
         : []),
+
+      // Individual hexes, not a dissolved area: each underserved cell carries
+      // its own demand and supply numbers, and keeping them separate is what
+      // lets the tooltip report them honestly. It also reads as a different
+      // form from the cluster outlines below, which is the whole reason the
+      // two can share a crowded palette.
+      ...(mapLayers.underserved.visible && underservedCells.length > 0
+        ? [
+            new H3HexagonLayer<UnderservedCell>({
+              ...analysisPlacement,
+              id: "underserved-cells",
+              data: underservedCells,
+              getHexagon: (d) => d.h3Index,
+              filled: true,
+              getFillColor: UNDERSERVED_FILL,
+              stroked: true,
+              getLineColor: UNDERSERVED_LINE,
+              lineWidthMinPixels: 1.5,
+              extruded: false,
+              opacity: mapLayers.underserved.opacity,
+              pickable: true,
+            }),
+          ]
+        : []),
+
+      // Dissolved cluster boundaries. Stroking each hexagon separately would
+      // draw a honeycomb and read as a grid rather than one cluster.
+      ...(mapLayers.hotspots.visible && regions.length > 0
+        ? [
+            new PolygonLayer<HotspotRegion>({
+              ...analysisPlacement,
+              id: "hotspot-regions",
+              data: regions,
+              getPolygon: (d) => d.rings,
+              filled: true,
+              getFillColor: (d) => (d.tone === "hot" ? HOT_FILL : COLD_FILL),
+              stroked: true,
+              getLineColor: (d) => (d.tone === "hot" ? HOT_LINE : COLD_LINE),
+              getLineWidth: 2,
+              lineWidthUnits: "pixels",
+              lineWidthMinPixels: 2,
+              opacity: mapLayers.hotspots.opacity,
+              // Deliberately not pickable. The outline's meaning is carried
+              // entirely by its color plus the rail's legend, and staying out
+              // of picking keeps the score hex underneath clickable.
+              pickable: false,
+            }),
+          ]
+        : []),
     ];
   }, [
     deckAnchor,
@@ -370,6 +778,12 @@ export default function MapCanvas() {
     weights,
     weightsReady,
     selectedH3,
+    mapLayers.underserved.visible,
+    mapLayers.underserved.opacity,
+    mapLayers.hotspots.visible,
+    mapLayers.hotspots.opacity,
+    underservedCells,
+    regions,
   ]);
 
   useEffect(() => {
@@ -385,18 +799,39 @@ export default function MapCanvas() {
 
     for (const layer of TILE_LAYERS) {
       const state = mapLayers[layer.id];
-      map.setLayoutProperty(
-        layer.style.id,
-        "visibility",
-        state.visible ? "visible" : "none",
-      );
-      map.setPaintProperty(
-        layer.style.id,
-        layer.opacityProperty,
-        state.opacity,
-      );
+      for (const pass of styleLayersOf(layer)) {
+        map.setLayoutProperty(
+          pass.spec.id,
+          "visibility",
+          state.visible ? "visible" : "none",
+        );
+        map.setPaintProperty(
+          pass.spec.id,
+          pass.opacityProperty,
+          state.opacity * pass.opacityScale,
+        );
+      }
     }
   }, [deckAnchor, mapLayers]);
+
+  // Publish painted-class tallies so the rail can caption each legend swatch
+  // with a real count. Left alone while a refetch is in flight: the store
+  // already cleared them when the parameter changed, and writing partial
+  // numbers here would caption the new legend with the old response.
+  useEffect(() => {
+    if (!hotspotsQuery.data) return;
+    setHotspotStats({
+      counts: countByClassification(hotspotCells, hotspotParams.method),
+      clusters: hotspotsQuery.data.clusters.length,
+      underserved: underservedCells.length,
+    });
+  }, [
+    hotspotsQuery.data,
+    hotspotCells,
+    underservedCells,
+    hotspotParams.method,
+    setHotspotStats,
+  ]);
 
   // Publish band counts for the rail's legend. Derived from every cell, not
   // just the visible ones, so the distribution does not shift when the
@@ -425,7 +860,6 @@ export default function MapCanvas() {
     });
   }, [cellsQuery.data, weights, weightsReady, setHeatmapStats]);
 
-  const stats = useMapStore((s) => s.heatmapStats);
   const loading = cellsQuery.isPending || presetsQuery.isPending;
   const failed = cellsQuery.error ?? presetsQuery.error;
 
@@ -437,38 +871,67 @@ export default function MapCanvas() {
     <div className="relative h-full w-full">
       <div ref={containerRef} className="h-full w-full" />
 
-      {/* Bottom-centred, clear of the top cluster (preset picker, score panel)
-          and of MapLibre's own controls at bottom-left and bottom-right. */}
-      {heatmap.visible ? (
-        <div className="pointer-events-none absolute inset-x-0 bottom-8 flex justify-center">
-          {loading ? (
-            <p className="flex items-center gap-1.5 rounded-full border border-border bg-card/90 px-3 py-1.5 text-xs text-muted-foreground backdrop-blur">
+      {/* Bottom-centre is the one strip nothing else claims: the picker and
+          the results card hold the top corners, the legend and the scale bar
+          the bottom-left, navigation and attribution the bottom-right.
+          A column so the grid notice and the POI hint stack instead of
+          landing on top of each other when both apply. */}
+      <div className="pointer-events-none absolute inset-x-0 bottom-8 flex flex-col items-center gap-1.5">
+        {heatmap.visible ? (
+          loading ? (
+            <p className={`${panelPill} text-muted-foreground`}>
               <LoaderCircleIcon className="size-3.5 shrink-0 animate-spin" />
-              Loading {PRESET_LABELS[preset]} grid…
+              Scoring {PRESET_LABELS[preset]} sites…
             </p>
           ) : failed ? (
-            <p className="flex items-center gap-1.5 rounded-full border border-destructive/40 bg-card/90 px-3 py-1.5 text-xs text-destructive backdrop-blur">
+            <p className={`${panelPill} text-destructive ring-destructive/35`}>
               <TriangleAlertIcon className="size-3.5 shrink-0" />
-              Grid unavailable — {failed.message}
+              Could not load scores. {failed.message}
             </p>
           ) : visibleCells.length === 0 ? (
-            <p className="flex items-center gap-1.5 rounded-full border border-border bg-card/90 px-3 py-1.5 text-xs text-muted-foreground backdrop-blur">
+            <p className={`${panelPill} text-muted-foreground`}>
               <CircleAlertIcon className="size-3.5 shrink-0" />
               {eligibleOnly
-                ? "No cells pass every constraint under this preset"
-                : "No scored cells to draw"}
+                ? "Nowhere clears every rule for this use case"
+                : "Nothing scored here yet"}
             </p>
-          ) : null}
-        </div>
-      ) : null}
+          ) : null
+        ) : null}
 
-      <ScorePanel
-        isPending={scorePoint.isPending}
-        error={scorePoint.error}
-        data={selectedData}
-        analytics={stats?.analytics ?? null}
-        weights={weightsReady ? weights : null}
-      />
+        {/* The analysis overlays draw nothing at all while their one request
+            is in flight or after it fails, so without this the reader ticks
+            a box and watches the map not change. */}
+        {analysisOn ? (
+          hotspotsQuery.isPending ? (
+            <p className={`${panelPill} text-muted-foreground`}>
+              <LoaderCircleIcon className="size-3.5 shrink-0 animate-spin" />
+              Looking for patterns…
+            </p>
+          ) : hotspotError ? (
+            <p className={`${panelPill} text-destructive ring-destructive/35`}>
+              <TriangleAlertIcon className="size-3.5 shrink-0" />
+              Could not find patterns. {hotspotError.message}
+            </p>
+          ) : null
+        ) : null}
+
+        {/* POIs are individual premises, not an area wash, and the archive
+            thins them hard at low zoom — so the layer reads as almost empty
+            on the opening view even though it is working. Saying so beats
+            letting it look broken. */}
+        {mapLayers.poi.visible ? (
+          <p className={`${panelPill} text-muted-foreground`}>
+            <MapPinIcon className="size-3.5 shrink-0" />
+            Points of interest are individual local places. Zoom in and pan to see more
+          </p>
+        ) : null}
+
+        {/* Last in the column, so the notices above stack on top of it rather
+            than landing on it. `index.css` lays the mounted control out
+            horizontally; MapLibre builds it as a vertical stack. */}
+        <div ref={zoomHostRef} className="wh-zoom-control" />
+      </div>
+
     </div>
   );
 }

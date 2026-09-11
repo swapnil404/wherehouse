@@ -1,6 +1,9 @@
 import { SCORE_BINS } from "@/lib/heatmap-palette";
 import { useMapStore } from "@/stores/map-store";
 
+import { panelSurface, text } from "./panel-styles";
+import SectionLabel from "./section-label";
+
 /**
  * Floating score legend, bottom-left of the map.
  *
@@ -25,16 +28,16 @@ export default function HeatmapLegend() {
   const span = SCORE_BINS[SCORE_BINS.length - 1].max - SCORE_BINS[0].min;
 
   return (
+    /* Back on the left edge with everything else. The offset here existed
+       only to clear the zoom bar, which now sits at the bottom centre; the
+       scale bar is all that is left in this corner and it occupies the
+       bottom strip, below `bottom-11`. */
     <div className="pointer-events-none absolute bottom-11 left-4 z-10">
-      <div className="pointer-events-auto w-60 rounded-lg border border-border bg-card/95 p-3 shadow-xl backdrop-blur">
+      <div className={`pointer-events-auto w-60 p-3 ${panelSurface}`}>
         <div className="flex items-baseline justify-between gap-2">
-          <h2 className="text-[10px] font-medium tracking-[0.08em] text-muted-foreground uppercase">
-            Site score
-          </h2>
+          <SectionLabel>Score</SectionLabel>
           {stats ? (
-            <span className="text-[10px] tabular-nums text-muted-foreground">
-              {stats.total} cells
-            </span>
+            <span className={`font-mono ${text.numeric}`}>{stats.total} places</span>
           ) : null}
         </div>
 
@@ -51,8 +54,8 @@ export default function HeatmapLegend() {
                 }}
                 title={
                   count == null
-                    ? `${bin.min}–${bin.max}`
-                    : `${bin.min}–${bin.max}: ${count} cells (${(
+                    ? `${bin.min} to ${bin.max}`
+                    : `${bin.min} to ${bin.max}: ${count} cells (${(
                         (100 * count) /
                         (stats?.total || 1)
                       ).toFixed(0)}%)`
@@ -64,7 +67,7 @@ export default function HeatmapLegend() {
 
         {/* Interior edges positioned proportionally so each number sits under
             the boundary it marks. */}
-        <div className="relative mt-1 h-3 text-[10px] tabular-nums text-muted-foreground">
+        <div className={`relative mt-1 h-3 font-mono ${text.numeric}`}>
           <span className="absolute left-0">{SCORE_BINS[0].min}</span>
           {SCORE_BINS.slice(1).map((bin) => (
             <span
@@ -80,11 +83,12 @@ export default function HeatmapLegend() {
           <span className="absolute right-0">100</span>
         </div>
 
-        <p className="mt-1.5 text-[11px] leading-snug text-muted-foreground">
-          {stats
-            ? `${stats.eligible} pass every constraint`
-            : "Ramp preview — no cells scored yet"}
-        </p>
+        {/* Only the empty state needs words. With a grid loaded the header
+            already gives the cell count, and the eligibility tally belongs
+            beside the checkbox that controls it, not under a colour ramp. */}
+        {stats ? null : (
+          <p className={`mt-2 ${text.hint}`}>Colour key. Nothing scored yet.</p>
+        )}
       </div>
     </div>
   );

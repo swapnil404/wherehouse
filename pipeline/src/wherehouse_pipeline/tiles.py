@@ -27,6 +27,9 @@ class TileLayer:
     max_zoom: int
     attributes: tuple[str, ...]
     attribution: str
+    #: Extra Tippecanoe flags for this layer only. Point layers need "-r1"
+    #: here; see the note on the "poi" entry below.
+    extra_args: tuple[str, ...] = ()
 
     @property
     def source_path(self) -> Path:
@@ -66,10 +69,23 @@ LAYERS = {
         attributes=("building_type",),
         attribution="OpenStreetMap contributors / Geofabrik",
     ),
+    # "-r1" disables point thinning, and it is not optional here.
+    #
+    # Tippecanoe's default --drop-rate of 2.5 divides the number of points by
+    # 2.5 for every zoom level below basezoom (which defaults to max_zoom).
+    # Over the seven levels from 17 down to 10 that is a ~600x reduction, and
+    # the published archive shows it: measured over one z10 tile's worth of
+    # ground in central Austin it holds 401 POIs at z15 but only 4 at z10, so
+    # the layer looked empty at the map's opening zoom. The classified POI set
+    # is small enough that no thinning is warranted at any zoom.
+    #
+    # --drop-densest-as-needed stays on below as a tile-size safety valve; it
+    # only triggers past the 500 KB limit, which this layer does not approach.
     "poi": TileLayer(
         name="poi",
         min_zoom=10,
         max_zoom=17,
+        extra_args=("-r1",),
         attributes=("name", "poi_kind", "poi_type"),
         attribution="OpenStreetMap contributors / Geofabrik",
     ),
@@ -232,6 +248,7 @@ def build_pmtiles(names: list[str] | None = None) -> list[Path]:
             "--attribution",
             layer.attribution,
         ]
+        command.extend(layer.extra_args)
         for attribute in layer.attributes:
             command.extend(("--include", attribute))
         command.append(str(layer.source_path))
