@@ -580,6 +580,12 @@
             "title": "H3Index",
             "type": "string"
           },
+          "scope": {
+            "const": "general_poi",
+            "default": "general_poi",
+            "title": "Scope",
+            "type": "string"
+          },
           "supply": {
             "title": "Supply",
             "type": "integer"

@@ -126,6 +126,9 @@ class UnderservedCell(BaseModel):
     h3_index: str = Field(alias="h3Index")
     demand: float
     supply: int
+    # Always "general_poi": residents vs real POI counts. There is no
+    # charger-supply data, so this must never be read as EV underservice.
+    scope: Literal["general_poi"] = "general_poi"
 
 
 class HotspotsResponse(BaseModel):

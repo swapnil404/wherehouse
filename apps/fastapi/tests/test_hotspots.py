@@ -92,6 +92,15 @@ class UnderservedTests(unittest.TestCase):
         flagged = {r["h3_index"] for r in find_underserved(frame)}
         self.assertEqual(flagged, {"cell-a", "cell-b"})
 
+    def test_underserved_entries_are_scoped_general_poi(self) -> None:
+        frame = pd.DataFrame([
+            {"h3_index": "cell-a", "population_density_percentile": 0.99, "poi_count": 3},
+            {"h3_index": "cell-b", "population_density_percentile": 0.01, "poi_count": 100},
+        ])
+        out = find_underserved(frame)
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]["scope"], "general_poi")
+
     def test_underserved_output_carries_raw_supply_counts(self) -> None:
         frame = pd.DataFrame([
             {"h3_index": "cell-a", "population_density_percentile": 0.99, "poi_count": 3},

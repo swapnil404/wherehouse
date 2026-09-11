@@ -345,6 +345,12 @@ export interface components {
             demand: number;
             /** H3Index */
             h3Index: string;
+            /**
+             * Scope
+             * @default general_poi
+             * @constant
+             */
+            scope: "general_poi";
             /** Supply */
             supply: number;
         };

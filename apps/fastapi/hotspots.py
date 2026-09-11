@@ -152,6 +152,7 @@ def find_underserved(frame) -> list:
             "h3_index": str(h3_index),
             "demand": round(float(d), 1),
             "supply": int(s),
+            "scope": "general_poi",
         }
         for h3_index, d, s in zip(frame["h3_index"], demand, supply)
         if d >= d_hi and s <= s_lo
