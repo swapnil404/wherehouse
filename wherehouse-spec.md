@@ -79,7 +79,7 @@ OFFLINE, NEVER DEPLOYED                                   (Swapnil)
 
 ### 3.1 Contract between TypeScript and Python
 
-**The sidecar's OpenAPI schema is the single source of truth.** `bun run gen:geo` generates a typed client from it; tRPC procedures wrap that client and do not manually duplicate its response shapes. After a FastAPI route or schema changes, regenerate and commit both `apps/fastapi/openapi.json` and the generated TypeScript definitions.
+**The sidecar's OpenAPI schema is the single source of truth for sidecar-backed operations.** `bun run gen:geo` generates a typed client from it; tRPC procedures wrap that client and do not manually duplicate its response shapes. After a FastAPI route or schema changes, regenerate and commit both `apps/fastapi/openapi.json` and the generated TypeScript definitions. Application-owned operations such as `geo.catchment` use native tRPC types and read precomputed Neon rows through Hyperdrive.
 
 The sidecar and ingestion data are real. Frontend work should target the agreed contract and connect to the real endpoint as soon as its matching backend PR lands; visual layout work does not need to wait for that merge.
 
@@ -210,7 +210,7 @@ Errors return `{error: {code, message, detail}}` with typed codes; an out-of-bou
 
 ## 7. Routing and catchment — hex reachability
 
-Precompute owned by Swapnil, consumed by Megha and Vaidehi.
+Precompute and the Neon-backed tRPC query are owned by Swapnil; the H3 bands are consumed by Vaidehi's UI.
 
 OSRM can't run on Cloudflare, and calling a hosted routing API at request time adds a network dependency to the demo. So routing is **fully precomputed offline** — and the H3 grid makes this unusually clean.
 
@@ -220,7 +220,7 @@ Boot OSRM locally in Docker on the Texas extract (`--max-table-size 4000`, car a
 
 What this buys:
 
-- **Isochrone display** — `ST_Union` the destination cell boundaries into a clean polygon band.
+- **Isochrone display** — return destination H3 indexes and draw their hex boundaries client-side with deck.gl. No runtime geometry union or polygon payload is needed.
 - **Catchment population** — `SUM(pop)` over destination cells. Exact against our own grid, with none of the area-weighted interpolation error you get from intersecting an isochrone polygon with census tracts. This is *more* accurate than the naive approach, not less.
 - **Zero runtime routing dependency.** Works on Workers, works offline, works when Render is cold.
 
@@ -391,7 +391,7 @@ Feature freeze. Clean-machine test — fresh clone → `bun install` → `bun ru
 
 Only after §12 is green, in priority order:
 
-1. **Transit isochrones** — GTFS via OpenTripPlanner, precomputed into `cell_reach` as `mode='transit'`. The schema already supports it. Closes the one requirement we knowingly half-meet.
+1. **Transit isochrones** — GTFS via OpenTripPlanner, precomputed into `cell_reach` after extending its mode and band constraints to support `transit`. Closes the one requirement we knowingly half-meet.
 2. **What-if optimizer** — given a polygon and preset, return top-N optimal points by refining to res 10.
 3. **Multi-site portfolio** — pick K sites maximizing coverage with minimal self-cannibalization.
 4. **Score-over-time** — how a site shifts under projected population growth.
@@ -419,7 +419,7 @@ Only after §12 is green, in priority order:
 | Compare multiple sites | §9 CompareTray | Vaidehi |
 | Export reports | §9 — PDF + GeoJSON | Vaidehi |
 | Routing / isochrones | §7 — precomputed OSRM, car + foot | Swapnil |
-| Catchment 10/20/30 min | §6, §7 | Megha / Swapnil |
+| Catchment 10/20/30 min | §7 — `geo.catchment` reads precomputed Neon rows | Swapnil / Vaidehi |
 | Validated vs. expert-labeled sites | §8.6 | Megha |
 | Python · GeoPandas · Shapely · H3 · sklearn | `apps/fastapi`, `pipeline/` | Megha / Swapnil |
 | FastAPI | `apps/fastapi` | Megha |
