@@ -170,6 +170,12 @@ resumes after an interruption. Use `just reach-build --refresh` only when you in
 replace every block. Validation checks the active dataset ID, complete source coverage, nested time
 bands, destination counts, and population totals before Neon is changed.
 
+At runtime, the authenticated `geo.catchment` tRPC query reads these rows directly from Neon. Pass
+the selected resolution-8 `h3Index` and either `car` or `foot`; the response contains the available
+time bands, reachable H3 indexes, destination counts, and catchment population. The browser derives
+hex boundaries from the indexes, so the response does not include polygon geometry and does not call
+OSRM or FastAPI.
+
 ## PMTiles Map Layers
 
 The map's roads, zoning, flood, buildings, and classified POI overlays are built separately from

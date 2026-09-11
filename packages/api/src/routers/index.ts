@@ -1,4 +1,5 @@
 import { TRPCError } from "@trpc/server";
+import { getActiveCatchment } from "@wherehouse/db";
 import { z } from "zod";
 
 import { protectedProcedure, publicProcedure, router } from "../index";
@@ -32,6 +33,11 @@ void _assertPresetsExhaustive;
 
 const presetSchema = z.enum(PRESET_NAMES);
 const hotspotMethodSchema = z.enum(["gi_star", "dbscan", "binning"]);
+const reachabilityModeSchema = z.enum(["car", "foot"]);
+const resolutionEightH3Schema = z.string().regex(
+  /^88[0-9a-f]{13}$/i,
+  "Expected a resolution-8 H3 index",
+);
 
 function mapGeoError(error: unknown): never {
   if (!(error instanceof GeoServiceError)) {
@@ -62,6 +68,22 @@ export const appRouter = router({
     };
   }),
   geo: router({
+    catchment: protectedProcedure
+      .input(z.object({
+        h3Index: resolutionEightH3Schema,
+        mode: reachabilityModeSchema,
+      }))
+      .query(async ({ input }) => {
+        const catchment = await getActiveCatchment(input.h3Index, input.mode);
+        if (!catchment) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "No catchment data exists for this H3 cell in the active dataset",
+          });
+        }
+
+        return catchment;
+      }),
     heatmap: protectedProcedure
       .input(z.object({ preset: presetSchema.default("warehouse") }))
       .query(async ({ input }) => {

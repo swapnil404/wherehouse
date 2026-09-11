@@ -69,7 +69,7 @@ CLOUDFLARE WORKERS — TanStack Start server                (Swapnil)
       ▼                               ▼                        │
 NEON POSTGRES + POSTGIS  ◄────  RENDER — FastAPI          (Megha)
   geo_dataset · h3_cell_fact     /heatmap /score /batch
-  auth · app · later: reach      later: hotspots / catchment    │
+  cell_reach · auth · app        /hotspots                       │
                                                                │
 NEON OBJECT STORAGE — *.pmtiles (roads, zoning, flood, buildings, POIs) ────┘
 
@@ -163,7 +163,7 @@ Heatmaps, point scoring, batch scoring, and later hotspot detection read the act
 
 Raw Austin OSM geometry is bulky and should not compete with application queries in Postgres. So:
 
-- **Postgres currently holds analysis-ready H3 facts** plus dataset provenance and application/auth tables. Precomputed reachability will be added later.
+- **Postgres currently holds analysis-ready H3 facts and precomputed `cell_reach` rows** plus dataset provenance and application/auth tables.
 - **Neon Object Storage holds display geometry** — `tippecanoe` builds vector tiles for roads, zoning, flood, buildings, and classified POIs; `pmtiles` packs them into single files in a public-read bucket, read client-side via the `pmtiles://` protocol. The visual POI categories reuse the ingestion classifier so map labels and scoring semantics stay aligned.
 - **Building footprints never enter Postgres.** They're aggregated to per-hex area at ingest and rendered only from tiles.
 
@@ -176,7 +176,7 @@ Drizzle has no representation for PostGIS polygons. Rather than fight it:
 | Owned by | Tables | Migrations |
 |---|---|---|
 | **Drizzle** | Better Auth tables + `project`, `saved_site`, `comparison_set` | `drizzle-kit` |
-| **Raw SQL** | `geo_dataset`, `geo_source_snapshot`, `geo_active_dataset`, `h3_cell_fact`; later `cell_reach` | `pipeline/sql/`, applied by the ingest pipeline |
+| **Raw SQL** | `geo_dataset`, `geo_source_snapshot`, `geo_active_dataset`, `h3_cell_fact`, `cell_reach` | `pipeline/sql/`, applied by the ingest pipeline |
 
 Geo tables are **not** declared in the Drizzle schema — `drizzle-kit push` would try to drop columns it can't model. TypeScript reads them via `db.execute(sql\`...\`)` with geometry cast to GeoJSON text.
 
@@ -194,12 +194,15 @@ Owned by Megha. `/health` is public; every `/v1` endpoint requires bearer authen
 | `POST /v1/score` | Composite score + weight-independent per-layer breakdown + constraint results for one point |
 | `POST /v1/score/batch` | Same for a point list, with a hard cap of 5,000 points |
 | `POST /v1/hotspots` | Getis-Ord Gi*, DBSCAN, or H3 binning; returns classified cells, clusters, and underserved areas |
-| `POST /v1/catchment` | Isochrone bands + catchment population, read from precomputed `cell_reach` |
 | `GET /v1/presets` · `/v1/validate/report` · `/health` | Config, validation metrics, warmup target |
 
 Exact request/response shapes are defined by the sidecar's OpenAPI schema (§3.1) and generated into the TypeScript client — they are deliberately not duplicated here, because a spec that restates a contract becomes the second place it can be wrong.
 
 `/v1/heatmap` is prepared once per active dataset and cached in the FastAPI process. deck.gl derives cell geometry directly from each H3 index. The browser calculates the initial weighted score and every slider update from the six subscores. It requests `/v1/score` only after a user clicks a cell, because that is when the verbose constraint breakdown is needed.
+
+Catchment is intentionally not a sidecar endpoint. The authenticated `geo.catchment` tRPC query
+reads the precomputed `cell_reach` rows directly from Neon and returns H3 indexes, counts, and
+population for each car or foot time band. Runtime catchment requests never call OSRM or FastAPI.
 
 Errors return `{error: {code, message, detail}}` with typed codes; an out-of-bounds coordinate returns `POINT_OUT_OF_BOUNDS` carrying the supported bbox, so the UI can say "outside the Austin coverage area" instead of showing a stack trace. tRPC maps these onto typed tRPC errors.
 
@@ -354,8 +357,8 @@ These phases organize the work; they are not gates. Teammates may pull forward a
 
 ### Phase 3 — Spatial analytics and accessibility
 
-**Megha** — add the FastAPI Dockerfile for the heavier geospatial runtime; Getis-Ord Gi*; DBSCAN on high-score candidates; underserved-area detection; `/catchment` reading `cell_reach`.
-**Swapnil** — the chunked, checkpointed OSRM matrix builder and packed `cell_reach` schema are implemented; run the car and foot graph preparation, validate and load the active dataset, then add tRPC routing endpoints reading straight from Postgres.
+**Megha** — FastAPI Docker packaging, Getis-Ord Gi*, DBSCAN on high-score candidates, and underserved-area detection.
+**Swapnil** — the chunked, checkpointed OSRM matrix builder, packed `cell_reach` schema, validated active-dataset load, and Neon-backed tRPC catchment query are complete.
 **Vaidehi** — hot-spot layer with diverging ramp; underserved view; isochrone bands + catchment table.
 
 *Exit:* hot-spots, cold-spots and underserved areas render; catchment works for car and walk.
