@@ -1,7 +1,5 @@
 import {
   CheckIcon,
-  CircleAlertIcon,
-  CircleCheckIcon,
   LoaderCircleIcon,
   TriangleAlertIcon,
   XIcon,
@@ -152,6 +150,7 @@ export default function ScorePanel({
   const scale = waterfall
     ? Math.max(...waterfall.contributions.map((c) => Math.abs(c.delta)), 0.01)
     : 0;
+  const failedRuleCount = data?.constraints.filter((constraint) => !constraint.pass).length ?? 0;
 
   // No positioning or elevation here any more. This is the body of the
   // results dock's "This site" tab, so the dock owns width, scrolling and
@@ -175,37 +174,50 @@ export default function ScorePanel({
         </div>
       ) : data ? (
         <div>
-          <div className="flex items-end justify-between gap-3">
+          <div className="flex items-end justify-between gap-4">
             <div>
               <SectionLabel as="p">Score</SectionLabel>
-              <div className="flex items-baseline gap-2">
+              <div className="flex items-end gap-3">
                 <ScoreValue value={data.score} />
                 {percentile != null ? (
-                  <span className="font-display text-xl font-semibold text-muted-foreground">
-                    {gradeFor(percentile)}
-                  </span>
+                  <div className="mb-0.5 border-l border-white/10 pl-2 leading-none">
+                    <span className="block text-[8px] uppercase tracking-[0.1em] text-muted-foreground">
+                      Grade
+                    </span>
+                    <span className="mt-1 block font-mono text-sm font-medium text-foreground">
+                      {gradeFor(percentile)}
+                    </span>
+                  </div>
                 ) : null}
               </div>
             </div>
-            {/* Icon + label, never color alone — this is a status cue, and hue
-                on its own does not survive colorblindness or a grayscale print. */}
-            <span
-              className={`flex shrink-0 items-center gap-1 text-[11px] font-medium ${
-                data.eligible ? "text-success" : "text-accent"
-              }`}
-            >
-              {data.eligible ? (
-                <CircleCheckIcon className="size-3.5 shrink-0" />
-              ) : (
-                <CircleAlertIcon className="size-3.5 shrink-0" />
-              )}
-              {data.eligible ? "Workable" : "Breaks a rule"}
-            </span>
+            <div className="w-28 pb-0.5">
+              <p className="text-xs font-normal text-muted-foreground">Eligibility</p>
+              <div aria-hidden="true" className="mt-2 flex gap-1">
+                {data.constraints.map((constraint) => (
+                  <span
+                    className={`h-1 flex-1 rounded-[1px] ${
+                      constraint.pass ? "bg-foreground/25" : "bg-accent"
+                    }`}
+                    key={constraint.id}
+                  />
+                ))}
+              </div>
+              <p
+                className={`mt-1.5 text-[11px] font-medium tabular-nums ${
+                  data.eligible ? "text-foreground" : "text-accent"
+                }`}
+              >
+                {data.eligible
+                  ? `${data.constraints.length}/${data.constraints.length} clear`
+                  : `${failedRuleCount}/${data.constraints.length} failed`}
+              </p>
+            </div>
           </div>
 
           {percentile != null ? (
             <p className={`mt-1 ${text.hint}`}>
-              Beats {percentile.toFixed(0)}% of the {analytics!.cellCount} places scored in Austin
+              Beats {percentile.toFixed(0)}% of {analytics!.cellCount} cells scored in Austin
             </p>
           ) : null}
 

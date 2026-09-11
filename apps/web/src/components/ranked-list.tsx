@@ -92,18 +92,6 @@ export default function RankedList() {
   return (
     <div>
       {filter}
-      {pageCount > 1 ? (
-        <Pager
-          from={start + 1}
-          to={start + rows.length}
-          total={total}
-          atStart={current === 0}
-          atEnd={current >= pageCount - 1}
-          onPrev={() => setPage(current - 1)}
-          onNext={() => setPage(current + 1)}
-        />
-      ) : null}
-
       <ol className="flex flex-col p-2">
         {rows.map((cell, index) => {
           const bin = SCORE_BINS[binIndexForScore(cell.score)];
@@ -155,13 +143,26 @@ export default function RankedList() {
       <p className={`px-4 pb-3 ${text.hint}`}>
         Best {ranked.length} for this use case. Click one to find it on the map.
       </p>
+
+      {pageCount > 1 ? (
+        <Pager
+          from={start + 1}
+          to={start + rows.length}
+          total={total}
+          atStart={current === 0}
+          atEnd={current >= pageCount - 1}
+          onPrev={() => setPage(current - 1)}
+          onNext={() => setPage(current + 1)}
+        />
+      ) : null}
     </div>
   );
 }
 
 /**
- * Range label and the two arrows, directly under the dock's tabs and above
- * the rows they move, so the label reads as a caption for what is below it.
+ * Range label and the two arrows at the foot of the shortlist, where paging
+ * controls conventionally sit and where they no longer interrupt the path
+ * from filters into results.
  *
  * Rendered only when there is more than one page: a disabled pair of arrows
  * over a three-row list is chrome describing nothing.
@@ -184,7 +185,7 @@ function Pager({
   onNext: () => void;
 }) {
   return (
-    <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-1.5">
+    <div className="flex items-center justify-between gap-2 border-t border-border px-3 py-1.5">
       <span className={`font-mono ${text.numeric}`}>
         {from}-{to} of {total}
       </span>
