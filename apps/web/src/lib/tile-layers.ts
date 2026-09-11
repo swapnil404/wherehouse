@@ -42,6 +42,20 @@ export interface TileLayerSpec {
   /** The paint property the rail's opacity slider drives. */
   opacityProperty: "fill-opacity" | "line-opacity" | "circle-opacity";
   /**
+   * Extra paint passes drawn *underneath* `style`, bottom-first.
+   *
+   * One rail row can therefore be more than one MapLibre layer — the POI dots
+   * plus the glow behind them — while a single toggle and a single opacity
+   * slider still drive the whole thing. `opacityScale` is multiplied into the
+   * slider value, which is what keeps a halo behind its dot at every setting
+   * instead of only at 100%.
+   */
+  underlays?: {
+    spec: CircleLayerSpecification | FillLayerSpecification | LineLayerSpecification;
+    opacityProperty: "fill-opacity" | "line-opacity" | "circle-opacity";
+    opacityScale: number;
+  }[];
+  /**
    * Seeds the store's slider and the style's initial paint value, so the two
    * cannot drift. Fills sit lower than line work: a wash has to let the score
    * hexes underneath read through it, a hairline does not.
@@ -320,16 +334,20 @@ export const TILE_LAYERS: readonly TileLayerSpec[] = [
           POI_COLORS.anchor,
           "#898781",
         ],
+        // Was 2px at z10, which is a single pixel of color once the dark
+        // stroke is drawn over it — effectively invisible at the zoom the
+        // map opens on. The glow underlay does most of the work of making
+        // these findable; the dot only has to stay crisp.
         "circle-radius": [
           "interpolate",
           ["linear"],
           ["zoom"],
           10,
-          2,
+          3.5,
           13,
-          4,
+          5,
           17,
-          7,
+          8,
         ],
         "circle-stroke-color": "#0e0e0e",
         "circle-stroke-width": [
@@ -343,11 +361,59 @@ export const TILE_LAYERS: readonly TileLayerSpec[] = [
         ],
       },
     },
+    // A blurred, larger, dimmer copy of each dot drawn underneath it. Points
+    // this small lose against a dark basemap and a score wash; a soft halo
+    // gives them enough area to register without inflating the dot itself,
+    // which would start merging neighbours into blobs.
+    underlays: [
+      {
+        opacityProperty: "circle-opacity",
+        // Faint on purpose. At full strength the halos read as the data and
+        // the dots as noise inside them, which inverts the encoding.
+        opacityScale: 0.3,
+        spec: {
+          id: "wh-poi-glow",
+          type: "circle",
+          source: "wh-poi",
+          "source-layer": "poi",
+          minzoom: 10,
+          paint: {
+            "circle-color": [
+              "match",
+              ["get", "poi_kind"],
+              "competitor",
+              POI_COLORS.competitor,
+              "complementary",
+              POI_COLORS.complementary,
+              "anchor",
+              POI_COLORS.anchor,
+              "#898781",
+            ],
+            // `circle-blur` of 1 fades the edge across the whole radius, so
+            // this reads as a glow rather than a second flat ring.
+            "circle-blur": 1,
+            "circle-radius": [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              10,
+              9,
+              13,
+              12,
+              17,
+              18,
+            ],
+          },
+        },
+      },
+    ],
     legend: [
       { label: "Competitor", hex: POI_COLORS.competitor },
       { label: "Complementary", hex: POI_COLORS.complementary },
       { label: "Anchor", hex: POI_COLORS.anchor },
     ],
+    // The archive itself starts at z10, so this is a property of the data and
+    // not of the style — it cannot be lowered without a rebuild.
     hint: "Visible from zoom 10",
   },
 ] as const;
@@ -358,6 +424,27 @@ export const TILE_LAYERS: readonly TileLayerSpec[] = [
  * added. Duplicating the value here would let the slider and the first paint
  * disagree.
  */
+
+/**
+ * Id of the lowest MapLibre layer a spec contributes — an underlay when it has
+ * one, otherwise the primary style. The score hexes anchor to this, so it has
+ * to be the true bottom of the stack rather than just `style.id`.
+ */
+export function bottomLayerId(layer: TileLayerSpec): string {
+  return layer.underlays?.[0]?.spec.id ?? layer.style.id;
+}
+
+/** Every MapLibre layer a spec contributes, bottom-first. */
+export function styleLayersOf(layer: TileLayerSpec) {
+  return [
+    ...(layer.underlays ?? []).map((u) => ({
+      spec: u.spec,
+      opacityProperty: u.opacityProperty,
+      opacityScale: u.opacityScale,
+    })),
+    { spec: layer.style, opacityProperty: layer.opacityProperty, opacityScale: 1 },
+  ];
+}
 
 /** URL for MapLibre's `pmtiles://` protocol handler. */
 export function archiveUrl(layer: TileLayerSpec): string {

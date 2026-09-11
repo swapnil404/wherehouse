@@ -42,7 +42,13 @@ import {
 } from "@/lib/hotspots";
 import { computeGridAnalytics } from "@/lib/score-analytics";
 import { useDebouncedValue } from "@/lib/use-debounced-value";
-import { PMTILES_BASE_URL, TILE_LAYERS, archiveUrl } from "@/lib/tile-layers";
+import {
+  PMTILES_BASE_URL,
+  TILE_LAYERS,
+  archiveUrl,
+  bottomLayerId,
+  styleLayersOf,
+} from "@/lib/tile-layers";
 import { useMapStore } from "@/stores/map-store";
 import { useTRPC, useTRPCClient } from "@/utils/trpc";
 
@@ -272,20 +278,25 @@ export default function MapCanvas() {
             url: archiveUrl(layer),
           });
           const state = useMapStore.getState().layers[layer.id];
-          const initialStyle = {
-            ...layer.style,
-            layout: {
-              ...layer.style.layout,
-              visibility: state.visible ? "visible" : "none",
-            },
-            paint: {
-              ...layer.style.paint,
-              [layer.opacityProperty]: state.opacity,
-            },
-          } as maplibregl.LayerSpecification;
-          // Each insert lands immediately below `labelStart`, so the layers
-          // stack in array order: zoning at the bottom, roads on top.
-          map.addLayer(initialStyle, labelStart);
+          // A rail row can contribute several paint passes (the POI glow sits
+          // under the POI dots). `styleLayersOf` returns them bottom-first,
+          // and each insert lands immediately below `labelStart`, so both the
+          // passes within a layer and the layers themselves stack in array
+          // order: zoning at the bottom, POI dots on top.
+          for (const pass of styleLayersOf(layer)) {
+            const initialStyle = {
+              ...pass.spec,
+              layout: {
+                ...pass.spec.layout,
+                visibility: state.visible ? "visible" : "none",
+              },
+              paint: {
+                ...pass.spec.paint,
+                [pass.opacityProperty]: state.opacity * pass.opacityScale,
+              },
+            } as maplibregl.LayerSpecification;
+            map.addLayer(initialStyle, labelStart);
+          }
         }
       }
 
@@ -294,7 +305,7 @@ export default function MapCanvas() {
       // overlay to sit under, so they anchor to the label boundary instead —
       // anchoring to a layer that was never added would throw in `addLayer`.
       setDeckAnchor({
-        hexBeforeId: PMTILES_BASE_URL ? TILE_LAYERS[0].style.id : labelStart,
+        hexBeforeId: PMTILES_BASE_URL ? bottomLayerId(TILE_LAYERS[0]) : labelStart,
         analysisBeforeId: labelStart,
       });
     });
@@ -536,16 +547,18 @@ export default function MapCanvas() {
 
     for (const layer of TILE_LAYERS) {
       const state = mapLayers[layer.id];
-      map.setLayoutProperty(
-        layer.style.id,
-        "visibility",
-        state.visible ? "visible" : "none",
-      );
-      map.setPaintProperty(
-        layer.style.id,
-        layer.opacityProperty,
-        state.opacity,
-      );
+      for (const pass of styleLayersOf(layer)) {
+        map.setLayoutProperty(
+          pass.spec.id,
+          "visibility",
+          state.visible ? "visible" : "none",
+        );
+        map.setPaintProperty(
+          pass.spec.id,
+          pass.opacityProperty,
+          state.opacity * pass.opacityScale,
+        );
+      }
     }
   }, [deckAnchor, mapLayers]);
 
