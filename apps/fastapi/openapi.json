@@ -173,6 +173,217 @@
         "title": "HeatmapResponse",
         "type": "object"
       },
+      "HotspotCluster": {
+        "properties": {
+          "cells": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Cells",
+            "type": "array"
+          },
+          "centroidLat": {
+            "title": "Centroidlat",
+            "type": "number"
+          },
+          "centroidLon": {
+            "title": "Centroidlon",
+            "type": "number"
+          },
+          "clusterId": {
+            "title": "Clusterid",
+            "type": "integer"
+          },
+          "meanScore": {
+            "title": "Meanscore",
+            "type": "number"
+          },
+          "size": {
+            "title": "Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "clusterId",
+          "size",
+          "meanScore",
+          "centroidLat",
+          "centroidLon",
+          "cells"
+        ],
+        "title": "HotspotCluster",
+        "type": "object"
+      },
+      "HotspotStatCell": {
+        "properties": {
+          "class": {
+            "title": "Class",
+            "type": "string"
+          },
+          "h3Index": {
+            "title": "H3Index",
+            "type": "string"
+          },
+          "score": {
+            "title": "Score",
+            "type": "number"
+          },
+          "stat": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stat"
+          }
+        },
+        "required": [
+          "h3Index",
+          "score",
+          "class"
+        ],
+        "title": "HotspotStatCell",
+        "type": "object"
+      },
+      "HotspotsRequest": {
+        "properties": {
+          "eps_km": {
+            "default": 1.5,
+            "maximum": 10.0,
+            "minimum": 0.1,
+            "title": "Eps Km",
+            "type": "number"
+          },
+          "k": {
+            "default": 2,
+            "maximum": 4.0,
+            "minimum": 1.0,
+            "title": "K",
+            "type": "integer"
+          },
+          "method": {
+            "default": "gi_star",
+            "enum": [
+              "gi_star",
+              "dbscan",
+              "binning"
+            ],
+            "title": "Method",
+            "type": "string"
+          },
+          "min_samples": {
+            "default": 4,
+            "maximum": 50.0,
+            "minimum": 2.0,
+            "title": "Min Samples",
+            "type": "integer"
+          },
+          "preset": {
+            "default": "warehouse",
+            "enum": [
+              "warehouse",
+              "retail",
+              "ev"
+            ],
+            "title": "Preset",
+            "type": "string"
+          },
+          "threshold": {
+            "default": 70.0,
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Threshold",
+            "type": "number"
+          },
+          "weights": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "minimum": 0.0,
+                  "type": "number"
+                },
+                "propertyNames": {
+                  "enum": [
+                    "demographics",
+                    "transport",
+                    "poi",
+                    "zoning",
+                    "flood",
+                    "aqi"
+                  ]
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weights"
+          }
+        },
+        "title": "HotspotsRequest",
+        "type": "object"
+      },
+      "HotspotsResponse": {
+        "properties": {
+          "cells": {
+            "items": {
+              "$ref": "#/components/schemas/HotspotStatCell"
+            },
+            "title": "Cells",
+            "type": "array"
+          },
+          "clusters": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/HotspotCluster"
+            },
+            "title": "Clusters",
+            "type": "array"
+          },
+          "datasetId": {
+            "title": "Datasetid",
+            "type": "string"
+          },
+          "h3Resolution": {
+            "title": "H3Resolution",
+            "type": "integer"
+          },
+          "method": {
+            "title": "Method",
+            "type": "string"
+          },
+          "preset": {
+            "enum": [
+              "warehouse",
+              "retail",
+              "ev"
+            ],
+            "title": "Preset",
+            "type": "string"
+          },
+          "underserved": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/UnderservedCell"
+            },
+            "title": "Underserved",
+            "type": "array"
+          }
+        },
+        "required": [
+          "datasetId",
+          "h3Resolution",
+          "preset",
+          "method",
+          "cells"
+        ],
+        "title": "HotspotsResponse",
+        "type": "object"
+      },
       "Point": {
         "properties": {
           "lat": {
@@ -325,6 +536,29 @@
         "title": "Subscores",
         "type": "object"
       },
+      "UnderservedCell": {
+        "properties": {
+          "demand": {
+            "title": "Demand",
+            "type": "number"
+          },
+          "h3Index": {
+            "title": "H3Index",
+            "type": "string"
+          },
+          "supply": {
+            "title": "Supply",
+            "type": "number"
+          }
+        },
+        "required": [
+          "h3Index",
+          "demand",
+          "supply"
+        ],
+        "title": "UnderservedCell",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -443,6 +677,50 @@
           }
         ],
         "summary": "Get Heatmap"
+      }
+    },
+    "/v1/hotspots": {
+      "post": {
+        "description": "Spec section 6: Gi*, DBSCAN, or H3 binning over preset composites.",
+        "operationId": "compute_hotspots_v1_hotspots_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HotspotsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HotspotsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Compute Hotspots"
       }
     },
     "/v1/presets": {
