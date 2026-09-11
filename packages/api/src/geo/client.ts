@@ -21,12 +21,16 @@ export type ScoreResponse = components["schemas"]["ScoreResponse"];
 export type BatchScoreRequest = components["schemas"]["BatchScoreRequest"];
 export type BatchScoreResponse = components["schemas"]["BatchScoreResponse"];
 
+interface GeoErrorEnvelope {
+  code?: string;
+  message?: string;
+  detail?: unknown;
+}
+
 interface GeoErrorBody {
-  detail?: string | {
-    code?: string;
-    message?: string;
-    [key: string]: unknown;
-  };
+  error?: GeoErrorEnvelope;
+  // Legacy FastAPI shape, kept as a fallback only.
+  detail?: string | (GeoErrorEnvelope & { [key: string]: unknown });
 }
 
 export class GeoServiceError extends Error {
@@ -60,14 +64,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       body = undefined;
     }
 
-    const structuredDetail =
-      body?.detail && typeof body.detail === "object" ? body.detail : undefined;
-    const code = structuredDetail?.code ?? `GEO_HTTP_${response.status}`;
-    const message = structuredDetail?.message
+    const envelope: GeoErrorEnvelope | undefined =
+      body?.error
+      ?? (body?.detail && typeof body.detail === "object" ? body.detail : undefined);
+    const code = envelope?.code ?? `GEO_HTTP_${response.status}`;
+    const message = envelope?.message
       ?? (typeof body?.detail === "string" ? body.detail : undefined)
+      ?? (typeof body?.error === "string" ? body.error : undefined)
       ?? `Geo service returned HTTP ${response.status}`;
 
-    throw new GeoServiceError(response.status, code, message, body?.detail);
+    throw new GeoServiceError(response.status, code, message, envelope?.detail);
   }
 
   return response.json() as Promise<T>;

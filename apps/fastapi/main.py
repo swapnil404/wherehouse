@@ -3,18 +3,32 @@ from contextlib import asynccontextmanager
 from typing import Dict, Optional
 
 import h3
+import numpy as np
 from fastapi import FastAPI, HTTPException, Depends, Security
+from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import ALLOWED_ORIGINS, GEO_SERVICE_TOKEN
 from data import get_dataset_id, get_df, get_h3_resolution, load_data
+from hotspots import (
+    cell_composites,
+    classify_bin,
+    classify_gi,
+    dbscan_on_candidates,
+    find_underserved,
+    gi_star_scores,
+    normal_p_value,
+)
 from schemas import (
     BatchScoreRequest,
     BatchScoreResponse,
     ConstraintResult,
     HeatmapCell,
     HeatmapResponse,
+    HotspotStatCell,
+    HotspotsRequest,
+    HotspotsResponse,
     Point,
     PresetName,
     ScoreRequest,
@@ -41,6 +55,12 @@ async def lifespan(app: FastAPI):
         str(cell): position for position, cell in enumerate(app.state.df["h3_index"])
     }
     print(f"Loaded {len(app.state.df):,} cells at H3 res {app.state.h3_res}")
+    app.state.bbox = {
+        "min_lat": round(float(app.state.df["centroid_lat"].min()), 6),
+        "max_lat": round(float(app.state.df["centroid_lat"].max()), 6),
+        "min_lon": round(float(app.state.df["centroid_lon"].min()), 6),
+        "max_lon": round(float(app.state.df["centroid_lon"].max()), 6),
+    }
     app.state.heatmap_cells = {
         preset: _build_heatmap_cells(app.state.df, preset)
         for preset in PRESET_WEIGHTS
@@ -68,6 +88,30 @@ app.add_middleware(
 security = HTTPBearer()
 
 
+@app.exception_handler(HTTPException)
+async def typed_error_handler(request, exc: HTTPException):
+    """Spec section 6: errors return {error: {code, message, detail}}."""
+    detail = exc.detail
+    if isinstance(detail, dict) and "code" in detail:
+        rest = {k: v for k, v in detail.items() if k not in ("code", "message")}
+        body = {
+            "error": {
+                "code": detail["code"],
+                "message": detail.get("message", ""),
+                "detail": rest or None,
+            }
+        }
+    else:
+        body = {
+            "error": {
+                "code": f"HTTP_{exc.status_code}",
+                "message": str(detail),
+                "detail": None,
+            }
+        }
+    return JSONResponse(status_code=exc.status_code, content=body)
+
+
 def verify_token(credentials: HTTPAuthorizationCredentials = Security(security)):
     if credentials.credentials != GEO_SERVICE_TOKEN:
         raise HTTPException(status_code=401, detail="Invalid token")
@@ -84,6 +128,7 @@ def _lookup_row(point: Point):
             detail={
                 "code": "POINT_OUT_OF_BOUNDS",
                 "message": f"Point ({point.lat}, {point.lon}) is out of bounds.",
+                "bbox": app.state.bbox,
             },
         )
     pos = app.state.cell_index.get(cell)
@@ -94,6 +139,7 @@ def _lookup_row(point: Point):
                 "code": "POINT_OUT_OF_BOUNDS",
                 "message": f"Point ({point.lat}, {point.lon}) is outside the covered area.",
                 "cell": cell,
+                "bbox": app.state.bbox,
             },
         )
     return app.state.df.iloc[pos]
@@ -172,6 +218,77 @@ def get_heatmap(
 @app.post("/v1/score", response_model=ScoreResponse)
 def score_point(req: ScoreRequest, _: str = Depends(verify_token)):
     return _score_single(req.point, req.preset, req.weights)
+
+
+@app.post("/v1/hotspots", response_model=HotspotsResponse)
+def compute_hotspots(req: HotspotsRequest, _: str = Depends(verify_token)):
+    """Spec section 6: Gi*, DBSCAN, or H3 binning over preset composites.
+
+    Subscores come from the heatmap cache; only the weighted composite
+    is recalculated per request.
+    """
+    df = app.state.df
+    h3_list = [str(h) for h in df["h3_index"].values]
+    weights = req.weights or PRESET_WEIGHTS[req.preset]
+    cached = [
+        {"h3_index": cell.h3_index, "subscores": cell.subscores.model_dump()}
+        for cell in app.state.heatmap_cells[req.preset]
+    ]
+    scores = cell_composites(cached, weights)
+
+    cells: list = []
+    clusters: list = []
+    if req.method == "gi_star":
+        z = gi_star_scores(h3_list, scores, k=req.k)
+        cells = [
+            HotspotStatCell(
+                h3_index=h,
+                score=round(float(s), 2),
+                classification=classify_gi(float(zi)),
+                z_score=round(float(zi), 3),
+                p_value=round(normal_p_value(float(zi)), 4),
+                confidence=round(1.0 - normal_p_value(float(zi)), 4),
+            )
+            for h, s, zi in zip(h3_list, scores, z)
+        ]
+    elif req.method == "binning":
+        q1, q2, q3 = (round(float(v), 2) for v in np.percentile(scores, [25, 50, 75]))
+        cells = [
+            HotspotStatCell(
+                h3_index=h,
+                score=round(float(s), 2),
+                classification=classify_bin(float(s), q1, q2, q3),
+            )
+            for h, s in zip(h3_list, scores)
+        ]
+    else:  # dbscan
+        labels, clusters, confidence = dbscan_on_candidates(
+            h3_list,
+            scores,
+            threshold=req.threshold,
+            eps_km=req.eps_km,
+            min_samples=req.min_samples,
+        )
+        cells = [
+            HotspotStatCell(
+                h3_index=h,
+                score=round(float(s), 2),
+                classification="noise" if lab == -1 else "cluster",
+                confidence=None if lab == -1 else round(float(conf), 2),
+                cluster_id=None if lab == -1 else int(lab),
+            )
+            for h, s, lab, conf in zip(h3_list, scores, labels, confidence)
+        ]
+
+    return HotspotsResponse(
+        dataset_id=app.state.dataset_id,
+        h3_resolution=app.state.h3_res,
+        preset=req.preset,
+        method=req.method,
+        cells=cells,
+        clusters=clusters,
+        underserved=find_underserved(df),
+    )
 
 
 @app.post("/v1/score/batch", response_model=BatchScoreResponse)
