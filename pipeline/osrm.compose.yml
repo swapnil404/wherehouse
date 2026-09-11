@@ -1,0 +1,32 @@
+name: wherehouse-osrm
+
+services:
+  car:
+    image: ghcr.io/project-osrm/osrm-backend:v26.7.3-debian
+    command:
+      - osrm-routed
+      - --algorithm
+      - mld
+      - --max-table-size
+      - "4000"
+      - /data/processed/osrm/car/texas.osrm
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./data:/data:ro
+    restart: unless-stopped
+
+  foot:
+    image: ghcr.io/project-osrm/osrm-backend:v26.7.3-debian
+    command:
+      - osrm-routed
+      - --algorithm
+      - mld
+      - --max-table-size
+      - "4000"
+      - /data/processed/osrm/foot/texas.osrm
+    ports:
+      - "5001:5000"
+    volumes:
+      - ./data:/data:ro
+    restart: unless-stopped

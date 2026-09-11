@@ -355,7 +355,7 @@ These phases organize the work; they are not gates. Teammates may pull forward a
 ### Phase 3 — Spatial analytics and accessibility
 
 **Megha** — add the FastAPI Dockerfile for the heavier geospatial runtime; Getis-Ord Gi*; DBSCAN on high-score candidates; underserved-area detection; `/catchment` reading `cell_reach`.
-**Swapnil** — the full OSRM duration matrix, chunked and checkpointed; `cell_reach` populated for car and foot; tRPC routing endpoints reading straight from Postgres.
+**Swapnil** — the chunked, checkpointed OSRM matrix builder and packed `cell_reach` schema are implemented; run the car and foot graph preparation, validate and load the active dataset, then add tRPC routing endpoints reading straight from Postgres.
 **Vaidehi** — hot-spot layer with diverging ramp; underserved view; isochrone bands + catchment table.
 
 *Exit:* hot-spots, cold-spots and underserved areas render; catchment works for car and walk.
@@ -430,13 +430,13 @@ Every line in the brief maps to a deliverable and an owner. Nothing is unassigne
 
 ## 13. Definition of done
 
-- [ ] Fresh clone → `bun install` → `bun run dev` works on a clean machine
+- [x] Fresh clone → `bun install` → `bun run dev` works on a clean machine
 - [x] Cloudflare + Render deploys are live and verified talking to each other
-- [ ] Six layers ingested, queryable, visible on the map
-- [ ] Signup → login → save a project and its sites → they persist
-- [ ] Clicking any point returns a scored breakdown in < 600 ms warm
-- [ ] Three presets produce visibly different heatmaps
-- [ ] Weight sliders re-score the visible map in < 250 ms with no network call
+- [x] Six layers ingested, queryable, visible on the map
+- [x] Signup → login → save a project and its sites → they persist
+- [x] Clicking any point returns a scored breakdown in < 600 ms warm
+- [x] Three presets produce visibly different heatmaps
+- [x] Weight sliders re-score the visible map in < 250 ms with no network call
 - [ ] Hot-spots, cold-spots and underserved areas render
 - [ ] Polygon draw → batch score → ranked results
 - [ ] Isochrones + catchment population for car and walk

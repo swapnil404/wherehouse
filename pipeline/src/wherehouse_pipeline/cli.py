@@ -9,8 +9,14 @@ from .build import build_facts
 from .config import FACTS_PATH, MANIFEST_PATH, PIPELINE_DIR, STATIC_SOURCES
 from .database import load_and_promote
 from .download import download_sources
-from .validation import require_valid, validate_facts
+from .reachability import (
+    build_reachability,
+    load_reachability,
+    require_valid_reachability,
+    validate_reachability,
+)
 from .tiles import build_pmtiles, prepare_tile_sources, validate_pmtiles
+from .validation import require_valid, validate_facts
 
 
 def _print_checks(checks) -> None:
@@ -36,7 +42,7 @@ def main() -> None:
     # Pipeline-specific values win; the existing web DATABASE_URL is a convenient fallback.
     web_env = dotenv_values(PIPELINE_DIR.parent / "apps" / "web" / ".env")
     pipeline_env = dotenv_values(PIPELINE_DIR / ".env")
-    for key in ("DATABASE_URL", "CENSUS_API_KEY"):
+    for key in ("DATABASE_URL", "CENSUS_API_KEY", "OSRM_CAR_URL", "OSRM_FOOT_URL"):
         value = pipeline_env.get(key) or web_env.get(key)
         if value:
             os.environ.setdefault(key, value)
@@ -62,6 +68,16 @@ def main() -> None:
             choices=("roads", "zoning", "flood", "buildings", "poi"),
             help="layers to process; defaults to all five",
         )
+    reach_build = subparsers.add_parser(
+        "reach-build", help="build checkpointed car and foot OSRM reachability"
+    )
+    reach_build.add_argument(
+        "--refresh", action="store_true", help="replace existing duration checkpoints"
+    )
+    reach_build.add_argument("--source-chunk-size", type=int, default=40)
+    reach_build.add_argument("--destination-chunk-size", type=int, default=160)
+    subparsers.add_parser("reach-validate", help="validate packed reachability output")
+    subparsers.add_parser("reach-load", help="load validated reachability into Neon")
     args = parser.parse_args()
 
     if args.command == "plan":
@@ -91,6 +107,22 @@ def main() -> None:
         build_pmtiles(args.layers)
     elif args.command == "tiles-validate":
         validate_pmtiles(args.layers)
+    elif args.command == "reach-build":
+        output = build_reachability(
+            refresh=args.refresh,
+            source_chunk_size=args.source_chunk_size,
+            destination_chunk_size=args.destination_chunk_size,
+        )
+        print(f"Wrote {output}")
+    elif args.command == "reach-validate":
+        checks = validate_reachability()
+        _print_checks(checks)
+        if not all(check.passed for check in checks):
+            raise SystemExit(1)
+    elif args.command == "reach-load":
+        _print_checks(require_valid_reachability())
+        dataset_id, row_count = load_reachability()
+        print(f"Loaded {row_count:,} reachability rows for Neon dataset {dataset_id}")
 
 
 if __name__ == "__main__":

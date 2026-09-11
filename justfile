@@ -80,6 +80,64 @@ ingest-load:
 ingest *ARGS:
     pipeline/.venv/bin/wherehouse-ingest run {{ARGS}}
 
+# Prepare one OSRM graph from the cached Texas PBF. MODE is car or foot.
+osrm-prepare MODE:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mode="{{MODE}}"
+    case "$mode" in
+        car|foot) ;;
+        *) echo "MODE must be car or foot"; exit 2 ;;
+    esac
+    image="${OSRM_IMAGE:-ghcr.io/project-osrm/osrm-backend:v26.7.3-debian}"
+    data_dir="$(pwd)/pipeline/data"
+    pbf="$data_dir/raw/texas-latest.osm.pbf"
+    test -f "$pbf" || { echo "Missing $pbf; run 'just ingest-download' first."; exit 1; }
+    mkdir -p "$data_dir/processed/osrm/$mode"
+    uid="$(id -u)"
+    gid="$(id -g)"
+    docker run --rm --user "$uid:$gid" --volume "$data_dir:/data" "$image" osrm-extract --profile "/opt/$mode.lua" --output "/data/processed/osrm/$mode/texas.osrm" /data/raw/texas-latest.osm.pbf
+    docker run --rm --user "$uid:$gid" --volume "$data_dir:/data" "$image" osrm-partition "/data/processed/osrm/$mode/texas.osrm"
+    docker run --rm --user "$uid:$gid" --volume "$data_dir:/data" "$image" osrm-customize "/data/processed/osrm/$mode/texas.osrm"
+
+# Start the prepared car and foot OSRM table services.
+osrm-start:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    docker compose --file pipeline/osrm.compose.yml up --detach
+    for port in 5000 5001; do
+        ready=false
+        for _ in $(seq 1 150); do
+            if curl --fail --silent "http://127.0.0.1:$port/nearest/v1/driving/-97.7431,30.2672?number=1" >/dev/null; then
+                ready=true
+                break
+            fi
+            sleep 2
+        done
+        if [ "$ready" != true ]; then
+            echo "OSRM on port $port did not become ready within five minutes."
+            docker compose --file pipeline/osrm.compose.yml logs
+            exit 1
+        fi
+    done
+    echo "OSRM car and foot table services are ready."
+
+# Stop the local OSRM table services.
+osrm-stop:
+    docker compose --file pipeline/osrm.compose.yml down
+
+# Build and checkpoint the full car/foot duration matrices.
+reach-build *ARGS:
+    pipeline/.venv/bin/wherehouse-ingest reach-build {{ARGS}}
+
+# Validate the packed reachability output without changing Neon.
+reach-validate:
+    pipeline/.venv/bin/wherehouse-ingest reach-validate
+
+# Validate and atomically load reachability into the active Neon dataset.
+reach-load:
+    pipeline/.venv/bin/wherehouse-ingest reach-load
+
 # Prepare lightweight Austin display geometry for vector tiling.
 tiles-prepare *LAYERS:
     pipeline/.venv/bin/wherehouse-ingest tiles-prepare {{LAYERS}}
