@@ -38,6 +38,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/hotspots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Compute Hotspots
+         * @description Spec section 6: Gi*, DBSCAN, or H3 binning over preset composites.
+         *
+         *     Subscores come from the heatmap cache; only the weighted composite
+         *     is recalculated per request.
+         */
+        post: operations["compute_hotspots_v1_hotspots_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/presets": {
         parameters: {
             query?: never;
@@ -162,6 +185,108 @@ export interface components {
              */
             preset: "warehouse" | "retail" | "ev";
         };
+        /** HotspotCluster */
+        HotspotCluster: {
+            /** Cells */
+            cells: string[];
+            /** Centroidlat */
+            centroidLat: number;
+            /** Centroidlon */
+            centroidLon: number;
+            /** Clusterid */
+            clusterId: number;
+            /** Meanscore */
+            meanScore: number;
+            /** Size */
+            size: number;
+        };
+        /**
+         * HotspotStatCell
+         * @description One classified cell. Only the fields relevant to the active
+         *     method are populated: zScore/pValue/confidence for Gi*, clusterId
+         *     (+confidence) for DBSCAN, classification for all methods.
+         */
+        HotspotStatCell: {
+            /** Classification */
+            classification: string;
+            /** Clusterid */
+            clusterId?: number | null;
+            /** Confidence */
+            confidence?: number | null;
+            /** H3Index */
+            h3Index: string;
+            /** Pvalue */
+            pValue?: number | null;
+            /** Score */
+            score: number;
+            /** Zscore */
+            zScore?: number | null;
+        };
+        /** HotspotsRequest */
+        HotspotsRequest: {
+            /**
+             * Eps Km
+             * @default 1.5
+             */
+            eps_km: number;
+            /**
+             * K
+             * @default 2
+             */
+            k: number;
+            /**
+             * Method
+             * @default gi_star
+             * @enum {string}
+             */
+            method: "gi_star" | "dbscan" | "binning";
+            /**
+             * Min Samples
+             * @default 4
+             */
+            min_samples: number;
+            /**
+             * Preset
+             * @default warehouse
+             * @enum {string}
+             */
+            preset: "warehouse" | "retail" | "ev";
+            /**
+             * Threshold
+             * @default 70
+             */
+            threshold: number;
+            /** Weights */
+            weights?: {
+                [key: string]: number;
+            } | null;
+        };
+        /** HotspotsResponse */
+        HotspotsResponse: {
+            /** Cells */
+            cells: components["schemas"]["HotspotStatCell"][];
+            /**
+             * Clusters
+             * @default []
+             */
+            clusters: components["schemas"]["HotspotCluster"][];
+            /** Datasetid */
+            datasetId: string;
+            /** H3Resolution */
+            h3Resolution: number;
+            /** Method */
+            method: string;
+            /**
+             * Preset
+             * @enum {string}
+             */
+            preset: "warehouse" | "retail" | "ev";
+            /**
+             * Underserved
+             * @default []
+             */
+            underserved: components["schemas"]["UnderservedCell"][];
+        };
         /** Point */
         Point: {
             /** Lat */
@@ -213,6 +338,15 @@ export interface components {
             transport: number;
             /** Zoning */
             zoning: number;
+        };
+        /** UnderservedCell */
+        UnderservedCell: {
+            /** Demand */
+            demand: number;
+            /** H3Index */
+            h3Index: string;
+            /** Supply */
+            supply: number;
         };
         /** ValidationError */
         ValidationError: {
@@ -274,6 +408,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HeatmapResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    compute_hotspots_v1_hotspots_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HotspotsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HotspotsResponse"];
                 };
             };
             /** @description Validation Error */

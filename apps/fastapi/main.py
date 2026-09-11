@@ -18,6 +18,7 @@ from hotspots import (
     dbscan_on_candidates,
     find_underserved,
     gi_star_scores,
+    normal_p_value,
 )
 from schemas import (
     BatchScoreRequest,
@@ -221,13 +222,17 @@ def score_point(req: ScoreRequest, _: str = Depends(verify_token)):
 
 @app.post("/v1/hotspots", response_model=HotspotsResponse)
 def compute_hotspots(req: HotspotsRequest, _: str = Depends(verify_token)):
-    """Spec section 6: Gi*, DBSCAN, or H3 binning over preset composites."""
+    """Spec section 6: Gi*, DBSCAN, or H3 binning over preset composites.
+
+    Subscores come from the heatmap cache; only the weighted composite
+    is recalculated per request.
+    """
     df = app.state.df
     h3_list = [str(h) for h in df["h3_index"].values]
     weights = req.weights or PRESET_WEIGHTS[req.preset]
-    subs_list = [compute_subscores(row, req.preset) for _, row in df.iterrows()]
     cached = [
-        {"h3_index": h, "subscores": dict(s)} for h, s in zip(h3_list, subs_list)
+        {"h3_index": cell.h3_index, "subscores": cell.subscores.model_dump()}
+        for cell in app.state.heatmap_cells[req.preset]
     ]
     scores = cell_composites(cached, weights)
 
@@ -239,8 +244,10 @@ def compute_hotspots(req: HotspotsRequest, _: str = Depends(verify_token)):
             HotspotStatCell(
                 h3_index=h,
                 score=round(float(s), 2),
-                stat=round(float(zi), 3),
-                class_=classify_gi(float(zi)),
+                classification=classify_gi(float(zi)),
+                z_score=round(float(zi), 3),
+                p_value=round(normal_p_value(float(zi)), 4),
+                confidence=round(1.0 - normal_p_value(float(zi)), 4),
             )
             for h, s, zi in zip(h3_list, scores, z)
         ]
@@ -250,13 +257,12 @@ def compute_hotspots(req: HotspotsRequest, _: str = Depends(verify_token)):
             HotspotStatCell(
                 h3_index=h,
                 score=round(float(s), 2),
-                stat=round(float(s), 2),
-                class_=classify_bin(float(s), q1, q2, q3),
+                classification=classify_bin(float(s), q1, q2, q3),
             )
             for h, s in zip(h3_list, scores)
         ]
     else:  # dbscan
-        labels, clusters = dbscan_on_candidates(
+        labels, clusters, confidence = dbscan_on_candidates(
             h3_list,
             scores,
             threshold=req.threshold,
@@ -267,10 +273,11 @@ def compute_hotspots(req: HotspotsRequest, _: str = Depends(verify_token)):
             HotspotStatCell(
                 h3_index=h,
                 score=round(float(s), 2),
-                stat=float(lab),
-                class_="noise" if lab == -1 else "cluster",
+                classification="noise" if lab == -1 else "cluster",
+                confidence=None if lab == -1 else round(float(conf), 2),
+                cluster_id=None if lab == -1 else int(lab),
             )
-            for h, s, lab in zip(h3_list, scores, labels)
+            for h, s, lab, conf in zip(h3_list, scores, labels, confidence)
         ]
 
     return HotspotsResponse(
@@ -280,7 +287,7 @@ def compute_hotspots(req: HotspotsRequest, _: str = Depends(verify_token)):
         method=req.method,
         cells=cells,
         clusters=clusters,
-        underserved=find_underserved(cached),
+        underserved=find_underserved(df),
     )
 
 

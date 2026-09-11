@@ -84,12 +84,19 @@ class HeatmapResponse(BaseModel):
 
 
 class HotspotStatCell(BaseModel):
+    """One classified cell. Only the fields relevant to the active
+    method are populated: zScore/pValue/confidence for Gi*, clusterId
+    (+confidence) for DBSCAN, classification for all methods."""
+
     model_config = ConfigDict(populate_by_name=True)
 
     h3_index: str = Field(alias="h3Index")
     score: float
-    stat: Optional[float] = None
-    class_: str = Field(alias="class")
+    classification: str
+    z_score: Optional[float] = Field(default=None, alias="zScore")
+    p_value: Optional[float] = Field(default=None, alias="pValue")
+    confidence: Optional[float] = None
+    cluster_id: Optional[int] = Field(default=None, alias="clusterId")
 
 
 class HotspotsRequest(BaseModel):
@@ -118,7 +125,7 @@ class UnderservedCell(BaseModel):
 
     h3_index: str = Field(alias="h3Index")
     demand: float
-    supply: float
+    supply: int
 
 
 class HotspotsResponse(BaseModel):

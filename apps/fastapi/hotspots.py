@@ -1,7 +1,7 @@
 """Hotspot analytics for the Wherehouse Geo API.
 
-Three methods (spec section 6), all running on the cached per-cell
-subscores from the /v1/hotspot dump:
+Three methods (spec section 6), all running on the cached heatmap
+subscores for one preset:
 
 - ``gi_star``  - Getis-Ord Gi* statistic: is a cell surrounded by
   high (or low) scores, beyond what chance would produce?
@@ -9,15 +9,23 @@ subscores from the /v1/hotspot dump:
   clusters (with noise points left out).
 - ``binning``  - Simple quartile bins of the composite score.
 
-Plus ``underserved`` detection (spec Phase 3 / demo step 5):
-high demand (demographics) combined with low supply (POI).
+Plus ``underserved`` detection: many residents but few real POIs.
+This is general retail/service underservice and must never be
+presented as EV charger underservice — no charger data exists.
 """
+
+import math
 
 import h3
 import numpy as np
 from sklearn.cluster import DBSCAN
 
 EARTH_RADIUS_KM = 6371.0088
+
+
+def normal_p_value(z: float) -> float:
+    """Two-tailed p-value for a z-score under the standard normal."""
+    return float(math.erfc(abs(z) / math.sqrt(2)))
 
 
 def cell_composites(cells, weights) -> np.ndarray:
@@ -85,12 +93,15 @@ def dbscan_on_candidates(
     eps_km: float = 1.5,
     min_samples: int = 4,
 ):
-    """Cluster cells scoring >= threshold. Returns (labels, clusters).
+    """Cluster cells scoring >= threshold.
 
-    labels aligns with h3_list (-1 = noise / below threshold).
-    clusters holds one dict per found cluster with centroid + members.
+    Returns (labels, clusters, confidences). labels aligns with h3_list
+    (-1 = noise / below threshold). clusters holds one dict per found
+    cluster with centroid + members. confidences aligns with h3_list:
+    1.0 for core members, 0.75 for border members, 0.0 for noise.
     """
     labels = np.full(len(scores), -1)
+    confidence = np.zeros(len(scores))
     mask = scores >= threshold
     idx = np.where(mask)[0]
     clusters = []
@@ -104,8 +115,12 @@ def dbscan_on_candidates(
             min_samples=min_samples,
             metric="haversine",
         ).fit(radians)
+        core = np.zeros(len(idx), dtype=bool)
+        core[db.core_sample_indices_] = True
         for j, lab in enumerate(db.labels_):
             labels[idx[j]] = int(lab)
+            if lab != -1:
+                confidence[idx[j]] = 1.0 if core[j] else 0.75
         for lab in sorted(set(db.labels_) - {-1}):
             members = idx[db.labels_ == lab]
             mcoords = coords[db.labels_ == lab]
@@ -117,23 +132,29 @@ def dbscan_on_candidates(
                 "centroid_lon": round(float(mcoords[:, 1].mean()), 6),
                 "cells": [h3_list[i] for i in members],
             })
-    return labels, clusters
+    return labels, clusters, confidence
 
 
-def find_underserved(cells: list) -> list:
-    """High demand + low supply: demographics >= p75 and POI <= p25."""
-    demo = np.array([c["subscores"]["demographics"] for c in cells])
-    poi = np.array([c["subscores"]["poi"] for c in cells])
-    d_hi, p_lo = float(np.percentile(demo, 75)), float(np.percentile(poi, 25))
+def find_underserved(frame) -> list:
+    """Cells with many residents but few real POIs.
+
+    Demand is the prepared ``population_density_percentile`` (0-100) and
+    supply is the raw ``poi_count`` — both real fields, never blended
+    suitability subscores. General retail/service underservice only:
+    do not present this as EV charging underservice, no charger data
+    exists.
+    """
+    demand = frame["population_density_percentile"].to_numpy(dtype=float) * 100.0
+    supply = frame["poi_count"].fillna(0).to_numpy(dtype=float)
+    d_hi, s_lo = float(np.percentile(demand, 75)), float(np.percentile(supply, 25))
     out = [
         {
-            "h3_index": c["h3_index"],
-            "demand": round(float(c["subscores"]["demographics"]), 2),
-            "supply": round(float(c["subscores"]["poi"]), 2),
+            "h3_index": str(h3_index),
+            "demand": round(float(d), 1),
+            "supply": int(s),
         }
-        for c in cells
-        if c["subscores"]["demographics"] >= d_hi
-        and c["subscores"]["poi"] <= p_lo
+        for h3_index, d, s in zip(frame["h3_index"], demand, supply)
+        if d >= d_hi and s <= s_lo
     ]
     out.sort(key=lambda r: r["demand"], reverse=True)
     return out

@@ -215,20 +215,24 @@
         "type": "object"
       },
       "HotspotStatCell": {
+        "description": "One classified cell. Only the fields relevant to the active\nmethod are populated: zScore/pValue/confidence for Gi*, clusterId\n(+confidence) for DBSCAN, classification for all methods.",
         "properties": {
-          "class": {
-            "title": "Class",
+          "classification": {
+            "title": "Classification",
             "type": "string"
           },
-          "h3Index": {
-            "title": "H3Index",
-            "type": "string"
+          "clusterId": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clusterid"
           },
-          "score": {
-            "title": "Score",
-            "type": "number"
-          },
-          "stat": {
+          "confidence": {
             "anyOf": [
               {
                 "type": "number"
@@ -237,13 +241,43 @@
                 "type": "null"
               }
             ],
-            "title": "Stat"
+            "title": "Confidence"
+          },
+          "h3Index": {
+            "title": "H3Index",
+            "type": "string"
+          },
+          "pValue": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pvalue"
+          },
+          "score": {
+            "title": "Score",
+            "type": "number"
+          },
+          "zScore": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Zscore"
           }
         },
         "required": [
           "h3Index",
           "score",
-          "class"
+          "classification"
         ],
         "title": "HotspotStatCell",
         "type": "object"
@@ -548,7 +582,7 @@
           },
           "supply": {
             "title": "Supply",
-            "type": "number"
+            "type": "integer"
           }
         },
         "required": [
@@ -681,7 +715,7 @@
     },
     "/v1/hotspots": {
       "post": {
-        "description": "Spec section 6: Gi*, DBSCAN, or H3 binning over preset composites.",
+        "description": "Spec section 6: Gi*, DBSCAN, or H3 binning over preset composites.\n\nSubscores come from the heatmap cache; only the weighted composite\nis recalculated per request.",
         "operationId": "compute_hotspots_v1_hotspots_post",
         "requestBody": {
           "content": {
