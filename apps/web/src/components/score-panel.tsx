@@ -190,10 +190,8 @@ export default function ScorePanel({
             {/* Icon + label, never color alone — this is a status cue, and hue
                 on its own does not survive colorblindness or a grayscale print. */}
             <span
-              className={`flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-[11px] font-medium ${
-                data.eligible
-                  ? "bg-success/12 text-success ring-1 ring-success/25"
-                  : "bg-warning/12 text-warning ring-1 ring-warning/25"
+              className={`flex shrink-0 items-center gap-1 text-[11px] font-medium ${
+                data.eligible ? "text-success" : "text-accent"
               }`}
             >
               {data.eligible ? (
