@@ -16,19 +16,18 @@
  * the map's own tooltips use, with a real blur behind them. Floating chrome
  * and map-spawned chrome become the same material.
  *
- * `shadow-xl` is a black blur, and a black blur on a near-black basemap is
- * invisible except as mud around the edge. Elevation on this surface comes
- * from the hairline ring and the blur instead, with a long soft shadow only
- * to lift the card off the map rather than to draw a box around it.
+ * The translucent fill and backdrop blur stay inside a crisp, low-contrast
+ * border. That follows the reference theme's card treatment without losing
+ * the glass material that separates map controls from the basemap.
  */
 
 /** Floating card over the map: legend, preset picker, score panel. */
 export const panelSurface =
-  "rounded-lg bg-popover/80 ring-1 ring-border backdrop-blur-md shadow-xl";
+  "rounded-lg border border-white/10 bg-black/70 backdrop-blur-xl shadow-xl";
 
 /** Small floating status pill, bottom-centre of the map. */
 export const panelPill =
-  "flex items-center gap-1.5 rounded-full bg-popover/80 px-3 py-1.5 text-xs ring-1 ring-border backdrop-blur-md";
+  "flex items-center gap-1.5 rounded-full border border-white/10 bg-black/70 px-3 py-1.5 text-xs backdrop-blur-xl";
 
 /**
  * Type scale.
@@ -59,16 +58,11 @@ export const text = {
 /**
  * Selected state for the segmented controls (preset picker, hotspot method).
  *
- * Carried by an accent ring over a faint accent wash, with the label left at
- * `--foreground`. The obvious alternative, the theme's own
- * `bg-accent` / `text-accent-foreground` pairing, is a solid fill of the
- * accent red with white text, and that measures 4.00:1. These labels are
- * 12px, so they need 4.5:1. Keeping the text on the card instead of on the
- * fill puts it at 19.8:1 and still spends the accent on the thing the accent
- * is for, which is showing you which one is live.
+ * Active options use the theme's solid accent red everywhere, so presets,
+ * tabs, filters, and analysis methods share one unmistakable selected state.
  */
 export const segment = {
   base: "rounded-md px-3 py-1.5 text-xs transition-colors",
-  active: "bg-accent/15 font-medium text-foreground ring-1 ring-accent",
+  active: "bg-accent font-medium text-accent-foreground",
   inactive: "text-muted-foreground hover:bg-foreground/5 hover:text-foreground",
 } as const;

@@ -32,32 +32,19 @@ export interface UnderservedCell {
 }
 
 /**
- * Form carries the distinction, not hue — and that was forced by measurement,
- * not preference.
- *
- * By the time this layer was added the map already spent eight categorical
- * colors across zoning, flood and POI plus a six-step blue score ramp, and the
- * warm half of the space was gone: a conventional Gi* red measures ΔE 4.9 from
- * zoning-industrial, 5.3 from flood-SFHA and 6.4 from POI-competitor, all far
- * under the 15 floor. So hotspots render as dissolved *outlines* — a form no
- * other layer uses — which frees hot and cold to keep the red/blue convention
- * every GIS reader expects. They only have to separate from each other and
- * from underserved, and they do: worst pair ΔE 24.2 normal, 9.8 CVD.
- *
- * `underserved` was picked by sweeping OKLCH hue space against every color
- * already on the map. Purple-magenta was the only region left; this step
- * clears all twelve (worst ΔE 18.8 normal vs zoning-commercial, 8.8 CVD vs
- * the mid score band).
+ * The score ramp now owns red, so analysis overlays use form plus neutral
+ * contrast: strong areas are white outlines, weak areas are gray outlines,
+ * and underserved cells retain the interface red as a filled finding.
  */
 export const HOTSPOT_COLORS = {
-  hot: "#e8453c",
-  cold: "#3f8fe0",
-  underserved: "#a52bb4",
+  hot: "#f4f4f0",
+  cold: "#737373",
+  underserved: "#e51b23",
 } as const;
 
-const HOT_RGB: [number, number, number] = [232, 69, 60];
-const COLD_RGB: [number, number, number] = [63, 143, 224];
-const UNDERSERVED_RGB: [number, number, number] = [165, 43, 180];
+const HOT_RGB: [number, number, number] = [244, 244, 240];
+const COLD_RGB: [number, number, number] = [115, 115, 115];
+const UNDERSERVED_RGB: [number, number, number] = [229, 27, 35];
 
 /**
  * Fills are a tint that groups an outline into an area without competing with

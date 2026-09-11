@@ -7,6 +7,17 @@ import {
   XIcon,
 } from "lucide-react";
 
+import score0 from "@/assets/score-font/0.png";
+import score1 from "@/assets/score-font/1.png";
+import score2 from "@/assets/score-font/2.png";
+import score3 from "@/assets/score-font/3.png";
+import score4 from "@/assets/score-font/4.png";
+import score5 from "@/assets/score-font/5.png";
+import score6 from "@/assets/score-font/6.png";
+import score7 from "@/assets/score-font/7.png";
+import score8 from "@/assets/score-font/8.png";
+import score9 from "@/assets/score-font/9.png";
+import scoreDot from "@/assets/score-font/dot.png";
 import {
   SUBSCORE_LABELS,
   type SubscoreKey,
@@ -57,20 +68,57 @@ interface ScorePanelProps {
   weights: Weights | null;
 }
 
+const SCORE_GLYPHS = {
+  "0": score0,
+  "1": score1,
+  "2": score2,
+  "3": score3,
+  "4": score4,
+  "5": score5,
+  "6": score6,
+  "7": score7,
+  "8": score8,
+  "9": score9,
+  ".": scoreDot,
+} as const;
+
+function ScoreValue({ value }: { value: number | null }) {
+  if (value == null) {
+    return <span className="text-4xl font-semibold">-</span>;
+  }
+
+  const formatted = value.toFixed(1);
+
+  return (
+    <span
+      aria-label={formatted}
+      className="inline-flex h-10 items-end gap-0.5"
+      role="img"
+    >
+      {[...formatted].map((glyph, index) => (
+        <img
+          alt=""
+          aria-hidden="true"
+          className="h-10 w-auto select-none invert dark:invert-0"
+          draggable={false}
+          key={`${glyph}-${index}`}
+          src={SCORE_GLYPHS[glyph as keyof typeof SCORE_GLYPHS]}
+        />
+      ))}
+    </span>
+  );
+}
+
 /** Signed contribution bar, centred on the baseline. */
 function DeltaBar({ delta, scale }: { delta: number; scale: number }) {
   const width = scale > 0 ? (Math.abs(delta) / scale) * 50 : 0;
   const positive = delta >= 0;
 
   return (
-    <div className="relative h-1.5 flex-1 rounded-full bg-muted/60">
-      <div className="absolute inset-y-0 left-1/2 w-px bg-border" />
-      {/* Accent for gains, destructive for drags. Both are theme tokens now,
-          so the bar cannot drift from the rest of the chrome the way the two
-          hand-picked hexes here previously did. Neither leans on hue alone:
-          each is also signed by the side of the baseline it grows from. */}
+    <div className="relative h-1 flex-1 overflow-hidden rounded-full bg-white/8">
+      <div className="absolute inset-y-0 left-1/2 w-px bg-white/25" />
       <div
-        className={`absolute inset-y-0 rounded-full ${positive ? "bg-primary" : "bg-destructive"}`}
+        className={`absolute inset-y-0 rounded-full ${positive ? "bg-foreground" : "bg-accent"}`}
         style={{ width: `${width}%`, [positive ? "left" : "right"]: "50%" }}
       />
     </div>
@@ -131,11 +179,9 @@ export default function ScorePanel({
             <div>
               <SectionLabel as="p">Score</SectionLabel>
               <div className="flex items-baseline gap-2">
-                <span className="font-mono text-3xl font-medium tracking-tight tabular-nums">
-                  {data.score == null ? "-" : data.score.toFixed(1)}
-                </span>
+                <ScoreValue value={data.score} />
                 {percentile != null ? (
-                  <span className="text-lg font-medium text-muted-foreground">
+                  <span className="font-display text-xl font-semibold text-muted-foreground">
                     {gradeFor(percentile)}
                   </span>
                 ) : null}
@@ -232,6 +278,14 @@ export default function ScorePanel({
           <p className="mt-4 truncate border-t border-border pt-2.5 font-mono text-[10.5px] text-muted-foreground">
             {data.h3_index}
           </p>
+          <a
+            className="mt-1.5 block text-[9px] text-muted-foreground/60 transition-colors hover:text-muted-foreground"
+            href="https://fontstruct.com/fontstructions/show/2095104/nothing-font-5x7"
+            rel="noreferrer"
+            target="_blank"
+          >
+            Score numerals: Nothing Font (5x7) by CTFonts
+          </a>
         </div>
       ) : (
         <p className="text-[13px] text-muted-foreground">

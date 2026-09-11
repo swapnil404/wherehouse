@@ -25,6 +25,7 @@
  * the light pair costs nothing while the app is in dark mode.
  */
 @import "@fontsource-variable/inter/wght.css";
+@import "@fontsource-variable/doto/wght.css";
 @import "@fontsource/space-mono/latin-400.css";
 @import "@fontsource/space-mono/latin-700.css";
 @import "@fontsource-variable/space-grotesk/wght.css";
@@ -80,6 +81,7 @@
   --sidebar-border: oklch(0.9234 0 0);
   --sidebar-ring: oklch(0 0 0);
   --font-sans: "Inter Variable", Inter, system-ui, sans-serif;
+  --font-display: "Doto Variable", "Space Mono", monospace;
   --font-serif: Georgia, serif;
   --font-mono: "Space Mono", monospace;
   --radius: 1.5rem;
@@ -104,15 +106,15 @@
 .dark {
   --background: oklch(0 0 0);
   --foreground: oklch(1.0000 0 0);
-  --card: oklch(0.1457 0 0);
+  --card: oklch(0.1150 0 0);
   --card-foreground: oklch(1.0000 0 0);
-  --popover: oklch(0.1457 0 0);
+  --popover: oklch(0.1150 0 0);
   --popover-foreground: oklch(1.0000 0 0);
   --primary: oklch(1.0000 0 0);
   --primary-foreground: oklch(0 0 0);
   --secondary: oklch(0.2376 0 0);
   --secondary-foreground: oklch(1.0000 0 0);
-  --muted: oklch(0.1930 0 0);
+  --muted: oklch(0.1750 0 0);
   --muted-foreground: oklch(0.6830 0 0);
   --accent: oklch(0.6280 0.2577 29.2339);
   --accent-foreground: oklch(1.0000 0 0);
@@ -120,7 +122,7 @@
   --destructive-foreground: oklch(1.0000 0 0);
   --success: oklch(0.7400 0.1900 150);
   --warning: oklch(0.8200 0.1700 82);
-  --border: oklch(0.2376 0 0);
+  --border: oklch(0.2850 0 0);
   --input: oklch(0.2376 0 0);
   --ring: oklch(1.0000 0 0);
   --chart-1: oklch(1.0000 0 0);
@@ -137,6 +139,7 @@
   --sidebar-border: oklch(0.2697 0 0);
   --sidebar-ring: oklch(1.0000 0 0);
   --font-sans: "Space Grotesk Variable", "Space Grotesk", system-ui, sans-serif;
+  --font-display: "Doto Variable", "Space Mono", monospace;
   --font-serif: "Times New Roman", serif;
   --font-mono: "JetBrains Mono Variable", "JetBrains Mono", monospace;
   --radius: 1.25rem;
@@ -193,6 +196,7 @@
   --color-sidebar-ring: var(--sidebar-ring);
 
   --font-sans: var(--font-sans);
+  --font-display: var(--font-display);
   --font-mono: var(--font-mono);
   --font-serif: var(--font-serif);
 

@@ -1,31 +1,14 @@
 /**
  * Score heatmap ramp.
  *
- * Single-hue blue, **inverted for the dark basemap**: luminance tracks
- * magnitude, so bright = high score and the low end recedes toward the
- * basemap instead of shouting. Every step is a documented ramp value,
- * validated against the CARTO dark-matter surface (`#0e0e0e`) for monotone
- * lightness and adjacent step separation.
+ * Nothing-inspired red-to-white ramp, inverted for the dark basemap:
+ * luminance tracks magnitude, so bright = high score and the low end recedes
+ * toward the basemap. Fixed bin edges still carry the data semantics; only
+ * the visual encoding changes.
  */
 
-/** CARTO dark-matter background. The hex seam is drawn from this. */
-export const BASEMAP_SURFACE = "#0e0e0e";
-export const BASEMAP_SURFACE_RGB: [number, number, number] = [14, 14, 14];
-
-/**
- * The line between two hexes.
- *
- * The basemap color, but at low alpha rather than opaque. At full strength it
- * drew a hard 1px gutter around every cell, and the grid read as separate
- * tiles floating over the map instead of one surface — the fills never
- * appeared to touch. Softened, the seam still marks where one cell ends,
- * which matters because scoring and selection are per-cell, but neighbours in
- * the same band now blend into a continuous area.
- *
- * The layer's own opacity multiplies this, so the seam fades with the ramp
- * instead of surviving as a grid over a dimmed heatmap.
- */
-export const HEX_SEAM_RGBA: [number, number, number, number] = [...BASEMAP_SURFACE_RGB, 70];
+/** A low-alpha seam that keeps individual H3 cells readable. */
+export const HEX_SEAM_RGBA: [number, number, number, number] = [14, 14, 14, 70];
 
 export interface ScoreBin {
   /** Inclusive lower edge. */
@@ -68,12 +51,12 @@ export interface ScoreBin {
  * change materially; they are a property of the data, not a style choice.
  */
 export const SCORE_BINS: readonly ScoreBin[] = [
-  { min: 0, max: 29, hex: "#0d366b", rgb: [13, 54, 107], alpha: 110 },
-  { min: 29, max: 34, hex: "#184f95", rgb: [24, 79, 149], alpha: 255 },
-  { min: 34, max: 39, hex: "#256abf", rgb: [37, 106, 191], alpha: 255 },
-  { min: 39, max: 46, hex: "#3987e5", rgb: [57, 135, 229], alpha: 255 },
-  { min: 46, max: 54, hex: "#86b6ef", rgb: [134, 182, 239], alpha: 255 },
-  { min: 54, max: 100, hex: "#cde2fb", rgb: [205, 226, 251], alpha: 255 },
+  { min: 0, max: 29, hex: "#260609", rgb: [38, 6, 9], alpha: 125 },
+  { min: 29, max: 34, hex: "#5c0b11", rgb: [92, 11, 17], alpha: 255 },
+  { min: 34, max: 39, hex: "#97131b", rgb: [151, 19, 27], alpha: 255 },
+  { min: 39, max: 46, hex: "#e51b23", rgb: [229, 27, 35], alpha: 255 },
+  { min: 46, max: 54, hex: "#ff666c", rgb: [255, 102, 108], alpha: 255 },
+  { min: 54, max: 100, hex: "#f4f4f0", rgb: [244, 244, 240], alpha: 255 },
 ] as const;
 
 export type Rgba = [number, number, number, number];

@@ -1,7 +1,5 @@
 import type { QueryClient } from "@tanstack/react-query";
-import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { HeadContent, Outlet, Scripts, createRootRouteWithContext } from "@tanstack/react-router";
-import { TanStackRouterDevtools } from "@tanstack/react-router-devtools";
 import type { TRPCOptionsProxy } from "@trpc/tanstack-react-query";
 import type { AppRouter } from "@wherehouse/api/routers/index";
 import { Toaster } from "@wherehouse/ui/components/sonner";
@@ -48,12 +46,6 @@ function RootDocument() {
           <Outlet />
         </div>
         <Toaster richColors />
-        {import.meta.env.DEV ? (
-          <>
-            <TanStackRouterDevtools position="bottom-left" />
-            <ReactQueryDevtools position="bottom" buttonPosition="bottom-right" />
-          </>
-        ) : null}
         <Scripts />
       </body>
     </html>

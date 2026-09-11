@@ -117,13 +117,13 @@ export default function RankedList() {
                 aria-current={active || undefined}
                 className={`flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors ${
                   active
-                    ? "bg-accent/15 ring-1 ring-accent"
+                    ? "bg-accent text-accent-foreground"
                     : "hover:bg-foreground/5"
                 }`}
               >
                 <span
                   className={`w-5 shrink-0 text-right font-mono text-[11px] tabular-nums ${
-                    active ? "text-foreground" : "text-muted-foreground"
+                    active ? "text-accent-foreground" : "text-muted-foreground"
                   }`}
                 >
                   {start + index + 1}
@@ -226,7 +226,7 @@ function FilterButton({
       aria-pressed={active}
       className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1 text-[11px] transition-colors ${
         active
-          ? "bg-accent/15 font-medium text-foreground ring-1 ring-accent"
+          ? "bg-accent font-medium text-accent-foreground"
           : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
       }`}
     >

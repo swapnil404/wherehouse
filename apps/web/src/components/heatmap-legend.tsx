@@ -25,7 +25,8 @@ export default function HeatmapLegend() {
 
   if (!visible) return null;
 
-  const span = SCORE_BINS[SCORE_BINS.length - 1].max - SCORE_BINS[0].min;
+  const minScore = SCORE_BINS[0].min;
+  const maxScore = SCORE_BINS[SCORE_BINS.length - 1].max;
 
   return (
     /* Back on the left edge with everything else. The offset here existed
@@ -37,7 +38,7 @@ export default function HeatmapLegend() {
         <div className="flex items-baseline justify-between gap-2">
           <SectionLabel>Score</SectionLabel>
           {stats ? (
-            <span className={`font-mono ${text.numeric}`}>{stats.total} places</span>
+            <span className={text.numeric}>{stats.total} cells</span>
           ) : null}
         </div>
 
@@ -65,22 +66,12 @@ export default function HeatmapLegend() {
           })}
         </div>
 
-        {/* Interior edges positioned proportionally so each number sits under
-            the boundary it marks. */}
-        <div className={`relative mt-1 h-3 font-mono ${text.numeric}`}>
-          <span className="absolute left-0">{SCORE_BINS[0].min}</span>
-          {SCORE_BINS.slice(1).map((bin) => (
-            <span
-              key={bin.min}
-              className="absolute -translate-x-1/2"
-              style={{
-                left: `${((bin.min - SCORE_BINS[0].min) / span) * 100}%`,
-              }}
-            >
-              {bin.min}
-            </span>
-          ))}
-          <span className="absolute right-0">100</span>
+        {/* Three stable ticks remain legible in the compact legend. Exact bin
+            ranges and counts are still available by hovering each segment. */}
+        <div className={`mt-1 flex justify-between ${text.numeric}`}>
+          <span>{minScore}</span>
+          <span>{(minScore + maxScore) / 2}</span>
+          <span>{maxScore}</span>
         </div>
 
         {/* Only the empty state needs words. With a grid loaded the header

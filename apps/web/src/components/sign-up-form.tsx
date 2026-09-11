@@ -167,7 +167,10 @@ export function SignUpForm({
                   {({ canSubmit, isSubmitting }) => (
                     <Button
                       type="submit"
-                      className={authForm.button}
+                      className={cn(
+                        authForm.button,
+                        "bg-accent text-accent-foreground hover:bg-accent/90",
+                      )}
                       disabled={!canSubmit || isSubmitting}
                     >
                       {isSubmitting ? "Creating account…" : "Create account"}

@@ -191,7 +191,7 @@ export default function AnalysisPanel() {
                   onClick={() => setParams({ method: option.id as HotspotMethod })}
                   className={
                     active
-                      ? "rounded-md bg-accent/15 px-1.5 py-1 text-[11px] font-medium text-foreground ring-1 ring-accent"
+                      ? "rounded-md bg-accent px-1.5 py-1 text-[11px] font-medium text-accent-foreground"
                       : "rounded-md px-1.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
                   }
                 >

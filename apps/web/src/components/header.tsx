@@ -18,13 +18,13 @@ import UserMenu from "./user-menu";
  */
 export default function Header() {
   return (
-    <header className="flex h-12 shrink-0 items-center justify-between gap-4 border-b border-border bg-card px-4">
+    <header className="flex h-12 shrink-0 items-center justify-between gap-4 border-b border-white/10 bg-black px-4">
       <Link
         to="/dashboard"
         className="flex shrink-0 items-center gap-2 rounded-md transition-opacity hover:opacity-80 focus-visible:ring-1 focus-visible:ring-ring/50 focus-visible:outline-none"
       >
         <HexagonIcon className="size-4 text-primary" aria-hidden />
-        <span className="text-[13px] font-semibold tracking-tight">Wherehouse</span>
+        <span className="font-display text-sm font-semibold uppercase tracking-[0.08em]">Wherehouse</span>
       </Link>
 
       <UserMenu />

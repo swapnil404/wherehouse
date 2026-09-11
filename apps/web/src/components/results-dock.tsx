@@ -41,7 +41,7 @@ type Tab = "ranked" | "site" | "tune";
 export default function ResultsDock() {
   // Collapsed by default: the map is the subject, and the shortlist is worth
   // covering part of it only once the reader goes looking for it.
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true);
   const [tab, setTab] = useState<Tab>("ranked");
 
   const ranked = useMapStore((s) => s.rankedCells);
@@ -172,7 +172,7 @@ function TabButton({
       aria-pressed={active}
       className={`rounded-md px-2 py-1 text-xs transition-colors ${
         active
-          ? "bg-accent/15 font-medium text-foreground ring-1 ring-accent"
+          ? "bg-accent font-medium text-accent-foreground"
           : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
       }`}
     >

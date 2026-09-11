@@ -15,8 +15,8 @@
  */
 export const authForm = {
   /** `--card-spacing` drives the card's own padding and its header/content padding. */
-  card: "text-sm [--card-spacing:--spacing(6)]",
-  title: "text-base font-semibold",
+  card: "border border-white/10 bg-black/70 text-sm backdrop-blur-xl [--card-spacing:--spacing(6)]",
+  title: "font-display text-lg font-semibold uppercase tracking-[0.06em]",
   description: "text-sm text-muted-foreground",
   fieldGroup: "gap-5",
   label: "text-sm font-medium",

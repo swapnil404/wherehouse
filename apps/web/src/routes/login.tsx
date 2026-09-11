@@ -23,7 +23,9 @@ function RouteComponent() {
             first impression is a form from no one in particular. */}
         <div className="mb-7 flex items-center justify-center gap-2">
           <HexagonIcon className="size-5 text-primary" aria-hidden />
-          <span className="text-[15px] font-semibold tracking-tight">Wherehouse</span>
+          <span className="font-display text-base font-semibold uppercase tracking-[0.08em]">
+            Wherehouse
+          </span>
         </div>
 
         {showSignIn ? (

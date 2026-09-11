@@ -677,10 +677,8 @@ export default function MapCanvas() {
               getHexagon: (d) => d.h3Index,
               getFillColor: (d) =>
                 colorForScore(compositeScore(d.subscores, weights)),
-              // A soft seam rather than a border — see `HEX_SEAM_RGBA`. Kept
-              // at a 1px minimum: thinner lands on sub-pixel widths, where
-              // antialiasing thins the seam again on top of the alpha and it
-              // breaks up unevenly across zoom levels.
+              // Soft seams preserve the H3 cell boundaries without turning
+              // the heatmap into a hard black honeycomb.
               stroked: true,
               getLineColor: HEX_SEAM_RGBA,
               lineWidthMinPixels: 1,

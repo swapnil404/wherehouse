@@ -141,7 +141,10 @@ export function LoginForm({
                   {({ canSubmit, isSubmitting }) => (
                     <Button
                       type="submit"
-                      className={authForm.button}
+                      className={cn(
+                        authForm.button,
+                        "bg-accent text-accent-foreground hover:bg-accent/90",
+                      )}
                       disabled={!canSubmit || isSubmitting}
                     >
                       {isSubmitting ? "Signing in…" : "Sign in"}

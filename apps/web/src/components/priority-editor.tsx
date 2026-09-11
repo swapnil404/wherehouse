@@ -166,7 +166,7 @@ export default function PriorityEditor({
                         }
                         className={`flex-1 rounded-md px-1 py-1 text-[11px] transition-colors ${
                           active
-                            ? "bg-accent/15 font-medium text-foreground ring-1 ring-accent"
+                            ? "bg-accent font-medium text-accent-foreground"
                             : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
                         }`}
                       >
