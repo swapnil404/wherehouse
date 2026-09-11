@@ -51,9 +51,10 @@
  * Dark card for MapLibre popups — currently the POI hover info.
  *
  * MapLibre ships its popup as an opaque white rounded box, which reads as a
- * foreign element over the dark-matter basemap. These values match the deck.gl
- * tooltip built in `map-canvas.tsx` so the two kinds of floating card on the
- * map are indistinguishable to the reader.
+ * foreign element over the dark-matter basemap. Both this and the deck.gl
+ * tooltip in `map-canvas.tsx` now resolve the same custom properties, so the
+ * two kinds of floating card on the map are identical by construction rather
+ * than by two transcriptions of the same hex values staying in sync.
  *
  * The tip is hidden rather than recolored: MapLibre draws it with per-anchor
  * border tricks, so tinting it correctly means overriding eight anchor
@@ -61,14 +62,14 @@
  * to the point without needing an arrow.
  */
 .wh-map-popup .maplibregl-popup-content {
-  background: #1a1a19;
-  color: #ffffff;
-  border: 1px solid rgb(255 255 255 / 0.1);
-  border-radius: 8px;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
   padding: 10px 12px;
-  box-shadow: 0 8px 24px rgb(0 0 0 / 0.45);
+  box-shadow: 0 16px 40px -16px rgb(0 0 0 / 0.8);
   font-size: 12px;
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family: var(--font-sans);
 }
 
 .wh-map-popup .maplibregl-popup-tip {
@@ -79,4 +80,34 @@
    swallow a click meant for the map underneath. */
 .wh-map-popup {
   pointer-events: none;
+}
+
+/**
+ * Indeterminate progress bar for the route-level pending state.
+ *
+ * Motion here is feedback, not decoration: it is the only signal that a
+ * pending screen is still working rather than stuck. Gated behind
+ * `prefers-reduced-motion: no-preference`; when motion is reduced the bar
+ * holds as a static partial fill, which still reads as "in progress"
+ * without travelling.
+ */
+.wh-indeterminate {
+  /* Resting position is on-screen, not off it: under reduced motion no
+     animation runs, so the untransformed state is the one that ships. */
+  transform: translateX(0);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .wh-indeterminate {
+    animation: wh-indeterminate 1.15s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+  }
+}
+
+@keyframes wh-indeterminate {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
 }

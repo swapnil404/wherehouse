@@ -8,11 +8,12 @@ import {
   MapPinIcon,
   TriangleAlertIcon,
 } from "lucide-react";
+import { cellToLatLng } from "h3-js";
 import maplibregl from "maplibre-gl";
 import { Protocol } from "pmtiles";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import ScorePanel from "./score-panel";
+import { panelPill } from "./panel-styles";
 import {
   PRESET_LABELS,
   SUBSCORE_KEYS,
@@ -65,6 +66,15 @@ import { useTRPC, useTRPCClient } from "@/utils/trpc";
 const AUSTIN = { lng: -97.7431, lat: 30.2672 };
 
 /** CARTO dark matter — free, no API key, OSM-attributed. */
+/**
+ * How many rows the shortlist carries.
+ *
+ * The grid is about a thousand cells. A shortlist exists to stop the reader
+ * scanning, so it has to end well before the eye gives up; past roughly
+ * thirty rows it is just the grid again in a narrower column.
+ */
+const RANKED_LIMIT = 25;
+
 const BASEMAP_STYLE =
   "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
 
@@ -116,12 +126,12 @@ const SWATCH_INDENT = "padding-left:14px";
 function poiRoleHtml(kind: unknown): string {
   const key = String(kind ?? "");
   const meta = key in POI_KIND_META ? POI_KIND_META[key as keyof typeof POI_KIND_META] : null;
-  const swatch = POI_KIND_COLOR[key] ?? "#898781";
+  const swatch = POI_KIND_COLOR[key] ?? "var(--muted-foreground)";
   const label = meta ? meta.label : humanize(key) || "Unclassified";
 
   const swatchRow = `<div style="display:flex;align-items:center;gap:6px">
         <span style="width:8px;height:8px;border-radius:2px;background:${swatch};flex:none"></span>
-        <span style="font-size:11px;font-weight:600;color:#ffffff">${escapeHtml(label)}</span>
+        <span style="font-size:11px;font-weight:600;color:var(--popover-foreground)">${escapeHtml(label)}</span>
       </div>`;
 
   // The archive only carries the three classified roles, so a missing entry
@@ -129,24 +139,24 @@ function poiRoleHtml(kind: unknown): string {
   if (!meta) return swatchRow;
 
   return `${swatchRow}
-      <div style="${SWATCH_INDENT};margin-top:2px;font-size:11px;line-height:1.4;color:#c3c2b7">
+      <div style="${SWATCH_INDENT};margin-top:2px;font-size:11px;line-height:1.4;color:color-mix(in oklab, var(--popover-foreground) 76%, transparent)">
         ${escapeHtml(meta.definition)}
       </div>
-      <div style="${SWATCH_INDENT};margin-top:3px;font-size:10px;line-height:1.35;color:#898781">
+      <div style="${SWATCH_INDENT};margin-top:3px;font-size:10px;line-height:1.35;color:var(--muted-foreground)">
         ${escapeHtml(meta.examples)}
       </div>`;
 }
 
 /** Shared by every tooltip the overlay renders, so they cannot drift apart. */
 const TOOLTIP_STYLE = {
-  backgroundColor: "#1a1a19",
-  color: "#ffffff",
-  border: "1px solid rgba(255,255,255,0.10)",
-  borderRadius: "8px",
+  backgroundColor: "var(--popover)",
+  color: "var(--popover-foreground)",
+  border: "1px solid var(--border)",
+  borderRadius: "var(--radius-md)",
   padding: "10px 12px",
   fontSize: "12px",
-  fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif",
-  boxShadow: "0 8px 24px rgba(0,0,0,0.45)",
+  fontFamily: "var(--font-sans)",
+  boxShadow: "0 16px 40px -16px rgba(0,0,0,0.8)",
 };
 
 /**
@@ -202,6 +212,11 @@ export default function MapCanvas() {
   const hotspotParams = useMapStore((s) => s.hotspotParams);
   const setHotspotStats = useMapStore((s) => s.setHotspotStats);
   const analysisOn = mapLayers.hotspots.visible || mapLayers.underserved.visible;
+
+  const setRankedCells = useMapStore((s) => s.setRankedCells);
+  const setSelection = useMapStore((s) => s.setSelection);
+  const pendingFocusH3 = useMapStore((s) => s.pendingFocusH3);
+  const clearPendingFocus = useMapStore((s) => s.clearPendingFocus);
 
   const scorePoint = useMutation(trpc.geo.score.mutationOptions());
   const scorePointRef = useRef(scorePoint.mutate);
@@ -291,6 +306,43 @@ export default function MapCanvas() {
     [cells, eligibleOnly],
   );
 
+  /**
+   * Top of the grid under the live weights.
+   *
+   * Ranked over `visibleCells`, so the "only workable sites" filter narrows
+   * the shortlist exactly as it narrows the map. Capped: past about thirty
+   * rows the list stops being a shortlist and the reader is back to scanning.
+   */
+  const rankedCells = useMemo(() => {
+    const scored: { h3Index: string; score: number; eligible: boolean }[] = [];
+    for (const cell of visibleCells) {
+      const score = compositeScore(cell.subscores, weights);
+      if (score != null) {
+        scored.push({ h3Index: cell.h3Index, score, eligible: cell.eligible });
+      }
+    }
+    scored.sort((a, b) => b.score - a.score);
+    return scored.slice(0, RANKED_LIMIT);
+  }, [visibleCells, weights]);
+
+  useEffect(() => {
+    setRankedCells(rankedCells.length > 0 ? rankedCells : null);
+  }, [rankedCells, setRankedCells]);
+
+  // The dock renders outside this client-only subtree, so the mutation's
+  // state has to reach it through the store.
+  useEffect(() => {
+    if (!scorePoint.isPending && !scorePoint.error && !scorePoint.data) {
+      setSelection(null);
+      return;
+    }
+    setSelection({
+      isPending: scorePoint.isPending,
+      error: scorePoint.error ? { message: scorePoint.error.message } : null,
+      cell: scorePoint.data ?? null,
+    });
+  }, [scorePoint.isPending, scorePoint.error, scorePoint.data, setSelection]);
+
   const selectedData = useMemo(() => {
     if (!scorePoint.data) return null;
     return {
@@ -308,6 +360,30 @@ export default function MapCanvas() {
     if (!point) return;
     scorePointRef.current({ point, preset });
   }, [preset]);
+
+  /**
+   * A shortlist row was clicked: centre that cell and score it.
+   *
+   * Scored through the same mutation as a map click, from the cell's own
+   * centroid, so the panel cannot disagree with the row that opened it.
+   * `flyTo` is skipped under reduced motion, which would otherwise pan the
+   * whole viewport for a second on every row click.
+   */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!pendingFocusH3 || !map) return;
+
+    const [lat, lon] = cellToLatLng(pendingFocusH3);
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const camera = { center: [lon, lat] as [number, number], zoom: Math.max(map.getZoom(), 12) };
+    if (reduceMotion) map.jumpTo(camera);
+    else map.flyTo({ ...camera, duration: 900 });
+
+    const { preset: activePreset, customWeights: edits } = useMapStore.getState();
+    selectedPointRef.current = { lat, lon };
+    scorePointRef.current({ point: { lat, lon }, preset: activePreset, weights: edits ?? undefined });
+    clearPendingFocus();
+  }, [pendingFocusH3, clearPendingFocus]);
 
   // The tooltip closure is built once with the overlay, so it reads the active
   // preset's weights through a ref rather than capturing a stale value.
@@ -327,9 +403,12 @@ export default function MapCanvas() {
       attributionControl: { compact: true },
     });
 
+    // Bottom-right, stacked over the attribution. The top-right corner
+    // belongs to the results card, and this control sitting there is what
+    // forced the old score panel's `right-16` offset.
     map.addControl(
       new maplibregl.NavigationControl({ visualizePitch: true }),
-      "top-right",
+      "bottom-right",
     );
     map.addControl(
       new maplibregl.ScaleControl({ unit: "metric" }),
@@ -372,7 +451,7 @@ export default function MapCanvas() {
                }</div>
                ${
                  type
-                   ? `<div style="margin-top:1px;font-size:11px;color:#898781">${escapeHtml(humanize(type))}</div>`
+                   ? `<div style="margin-top:1px;font-size:11px;color:var(--muted-foreground)">${escapeHtml(humanize(type))}</div>`
                    : ""
                }
                <div style="margin-top:8px">${poiRoleHtml(kind)}</div>
@@ -444,6 +523,7 @@ export default function MapCanvas() {
       const { preset: activePreset, customWeights: edits } =
         useMapStore.getState();
       const point = { lat: lngLat.lat, lon: lngLat.lng };
+      useMapStore.getState().setSelectionOrigin("map");
       selectedPointRef.current = point;
       scorePointRef.current({
         point,
@@ -476,14 +556,14 @@ export default function MapCanvas() {
               <div style="min-width:190px">
                 <div style="font-weight:600;margin-bottom:6px">Underserved</div>
                 <div style="display:flex;justify-content:space-between;gap:12px">
-                  <span style="color:#898781">Residents (percentile)</span>
-                  <span style="font-variant-numeric:tabular-nums">${cell.demand.toFixed(0)}</span>
+                  <span style="color:var(--muted-foreground)">People nearby</span>
+                  <span style="font-family:var(--font-mono);font-variant-numeric:tabular-nums">${cell.demand.toFixed(0)}</span>
                 </div>
                 <div style="display:flex;justify-content:space-between;gap:12px">
-                  <span style="color:#898781">POIs in cell</span>
-                  <span style="font-variant-numeric:tabular-nums">${cell.supply}</span>
+                  <span style="color:var(--muted-foreground)">Businesses here</span>
+                  <span style="font-family:var(--font-mono);font-variant-numeric:tabular-nums">${cell.supply}</span>
                 </div>
-                <div style="margin-top:6px;font-size:10px;color:#898781">
+                <div style="margin-top:6px;font-size:10px;color:var(--muted-foreground)">
                   General retail and services only
                 </div>
               </div>`,
@@ -496,8 +576,8 @@ export default function MapCanvas() {
         const rows = SUBSCORE_KEYS.map(
           (key) =>
             `<div style="display:flex;justify-content:space-between;gap:12px">
-               <span style="color:#898781">${SUBSCORE_LABELS[key]}</span>
-               <span style="font-variant-numeric:tabular-nums">${cell.subscores[key].toFixed(0)}</span>
+               <span style="color:var(--muted-foreground)">${SUBSCORE_LABELS[key]}</span>
+               <span style="font-family:var(--font-mono);font-variant-numeric:tabular-nums">${cell.subscores[key].toFixed(0)}</span>
              </div>`,
         ).join("");
 
@@ -505,15 +585,17 @@ export default function MapCanvas() {
           html: `
             <div style="min-width:190px">
               <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:6px">
-                <span style="font-size:18px;font-weight:600;font-variant-numeric:tabular-nums">
-                  ${score == null ? "—" : score.toFixed(1)}
+                <span style="font-size:18px;font-weight:600;font-family:var(--font-mono);font-variant-numeric:tabular-nums">
+                  ${score == null ? "-" : score.toFixed(1)}
                 </span>
-                <span style="font-size:11px;color:${cell.eligible ? "#0ca30c" : "#d03b3b"}">
-                  ${cell.eligible ? "Eligible" : "Constraints failed"}
+                <span style="font-size:11px;color:${
+                  cell.eligible ? "var(--success)" : "var(--destructive)"
+                }">
+                  ${cell.eligible ? "Workable" : "Breaks a rule"}
                 </span>
               </div>
               ${rows}
-              <div style="margin-top:6px;font-size:10px;color:#898781">${cell.h3Index}</div>
+              <div style="margin-top:6px;font-size:10px;font-family:var(--font-mono);color:var(--muted-foreground)">${cell.h3Index}</div>
             </div>`,
           style: TOOLTIP_STYLE,
         };
@@ -740,7 +822,6 @@ export default function MapCanvas() {
     });
   }, [cellsQuery.data, weights, weightsReady, setHeatmapStats]);
 
-  const stats = useMapStore((s) => s.heatmapStats);
   const loading = cellsQuery.isPending || presetsQuery.isPending;
   const failed = cellsQuery.error ?? presetsQuery.error;
 
@@ -752,28 +833,29 @@ export default function MapCanvas() {
     <div className="relative h-full w-full">
       <div ref={containerRef} className="h-full w-full" />
 
-      {/* Bottom-centred, clear of the top cluster (preset picker, score panel)
-          and of MapLibre's own controls at bottom-left and bottom-right.
+      {/* Bottom-centre is the one strip nothing else claims: the picker and
+          the results card hold the top corners, the legend and the scale bar
+          the bottom-left, navigation and attribution the bottom-right.
           A column so the grid notice and the POI hint stack instead of
           landing on top of each other when both apply. */}
       <div className="pointer-events-none absolute inset-x-0 bottom-8 flex flex-col items-center gap-1.5">
         {heatmap.visible ? (
           loading ? (
-            <p className="flex items-center gap-1.5 rounded-full border border-border bg-card/90 px-3 py-1.5 text-xs text-muted-foreground backdrop-blur">
+            <p className={`${panelPill} text-muted-foreground`}>
               <LoaderCircleIcon className="size-3.5 shrink-0 animate-spin" />
-              Loading {PRESET_LABELS[preset]} grid…
+              Scoring {PRESET_LABELS[preset]} sites…
             </p>
           ) : failed ? (
-            <p className="flex items-center gap-1.5 rounded-full border border-destructive/40 bg-card/90 px-3 py-1.5 text-xs text-destructive backdrop-blur">
+            <p className={`${panelPill} text-destructive ring-destructive/35`}>
               <TriangleAlertIcon className="size-3.5 shrink-0" />
-              Grid unavailable — {failed.message}
+              Could not load scores. {failed.message}
             </p>
           ) : visibleCells.length === 0 ? (
-            <p className="flex items-center gap-1.5 rounded-full border border-border bg-card/90 px-3 py-1.5 text-xs text-muted-foreground backdrop-blur">
+            <p className={`${panelPill} text-muted-foreground`}>
               <CircleAlertIcon className="size-3.5 shrink-0" />
               {eligibleOnly
-                ? "No cells pass every constraint under this preset"
-                : "No scored cells to draw"}
+                ? "Nowhere clears every rule for this use case"
+                : "Nothing scored here yet"}
             </p>
           ) : null
         ) : null}
@@ -783,21 +865,13 @@ export default function MapCanvas() {
             on the opening view even though it is working. Saying so beats
             letting it look broken. */}
         {mapLayers.poi.visible ? (
-          <p className="flex items-center gap-1.5 rounded-full border border-border bg-card/90 px-3 py-1.5 text-xs text-muted-foreground backdrop-blur">
+          <p className={`${panelPill} text-muted-foreground`}>
             <MapPinIcon className="size-3.5 shrink-0" />
-            Points of interest are individual local places — zoom in and pan to
-            see more of them
+            Points of interest are individual local places. Zoom in and pan to see more
           </p>
         ) : null}
       </div>
 
-      <ScorePanel
-        isPending={scorePoint.isPending}
-        error={scorePoint.error}
-        data={selectedData}
-        analytics={stats?.analytics ?? null}
-        weights={weightsReady ? weights : null}
-      />
     </div>
   );
 }

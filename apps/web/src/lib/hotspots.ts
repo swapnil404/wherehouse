@@ -100,26 +100,31 @@ export interface MethodMeta {
 export const HOTSPOT_METHODS: readonly MethodMeta[] = [
   {
     id: "gi_star",
-    label: "Getis-Ord Gi*",
-    blurb: "Clusters that are statistically unlikely at 95% (|z| ≥ 1.96).",
+    // Getis-Ord Gi*. Named for what it tells you rather than for the
+    // statistician: the method name and its z-thresholds meant nothing to
+    // anyone choosing a site, and reading "|z| >= 1.96" off a control panel
+    // is the clearest sign a tool was built for its author.
+    label: "Proven",
+    blurb: "Groups unlikely to be coincidence. The strictest test.",
     painted: [
-      { classification: "hot", tone: "hot", label: "Hot spot (z ≥ 1.96)" },
-      { classification: "cold", tone: "cold", label: "Cold spot (z ≤ −1.96)" },
+      { classification: "hot", tone: "hot", label: "Strong area" },
+      { classification: "cold", tone: "cold", label: "Weak area" },
     ],
   },
   {
     id: "dbscan",
-    label: "DBSCAN",
-    blurb: "Density clusters among cells scoring at or above the threshold.",
-    painted: [{ classification: "cluster", tone: "hot", label: "Candidate cluster" }],
+    // DBSCAN.
+    label: "Dense",
+    blurb: "Tight pockets of high scorers, ignoring isolated one-offs.",
+    painted: [{ classification: "cluster", tone: "hot", label: "Candidate area" }],
   },
   {
     id: "binning",
-    label: "Quartile bins",
-    blurb: "Top and bottom quartiles of the composite. No significance test.",
+    label: "Simple",
+    blurb: "Best and worst quarter of the grid. No statistics involved.",
     painted: [
-      { classification: "hot", tone: "hot", label: "Top quartile" },
-      { classification: "cold", tone: "cold", label: "Bottom quartile" },
+      { classification: "hot", tone: "hot", label: "Best quarter" },
+      { classification: "cold", tone: "cold", label: "Worst quarter" },
     ],
   },
 ] as const;

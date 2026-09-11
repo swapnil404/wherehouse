@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-import type { PresetName, SubscoreKey, Weights } from "@/lib/cells";
+import type { PresetName, ScoredCell, SubscoreKey, Weights } from "@/lib/cells";
 import type { HotspotMethod } from "@/lib/hotspots";
 import type { GridAnalytics } from "@/lib/score-analytics";
 import {
@@ -67,13 +67,13 @@ export const LAYER_META: readonly LayerMeta[] = [
 export const ANALYSIS_META: readonly { id: AnalysisLayerId; label: string; hint: string }[] = [
   {
     id: "hotspots",
-    label: "Clusters",
-    hint: "Statistically significant clusters of the current composite",
+    label: "Strong areas",
+    hint: "Where good sites bunch together instead of standing alone",
   },
   {
     id: "underserved",
-    label: "Underserved areas",
-    hint: "Top-quartile residents, bottom-quartile POI supply",
+    label: "Gaps in the market",
+    hint: "Plenty of people, few businesses already serving them",
   },
 ] as const;
 
@@ -144,6 +144,34 @@ export interface HeatmapStats {
   analytics: GridAnalytics | null;
 }
 
+/**
+ * One row of the shortlist.
+ *
+ * Published by the canvas rather than fetched: the heatmap payload already
+ * carries every cell's subscores, so ranking is a sort over data the client
+ * holds. That is the same property that lets the weight sliders recolour the
+ * map with no request, and it means the shortlist reorders live while a
+ * slider is dragged instead of waiting on a round trip.
+ */
+export interface RankedCell {
+  h3Index: string;
+  score: number;
+  eligible: boolean;
+}
+
+/**
+ * The clicked cell, as the canvas's score mutation sees it.
+ *
+ * The composite score is deliberately absent. `/v1/score` returns subscores
+ * and the client weights them, so a slider drag updates the open panel
+ * without refetching, exactly as it updates the map.
+ */
+export interface SelectionState {
+  isPending: boolean;
+  error: { message: string } | null;
+  cell: ScoredCell | null;
+}
+
 interface MapStore {
   layers: Record<LayerId, LayerState>;
   preset: PresetName;
@@ -179,6 +207,33 @@ interface MapStore {
    * preset clears it rather than carrying edits across use cases.
    */
   customWeights: Weights | null;
+  /**
+   * Top of the grid under the live weights, best first. `null` until the
+   * canvas has scored a grid.
+   */
+  rankedCells: RankedCell[] | null;
+  /** The clicked cell. `null` before the first click of a session. */
+  selection: SelectionState | null;
+  /**
+   * A cell the results dock has asked the map to visit.
+   *
+   * A command rather than a callback: the dock renders during SSR as a
+   * sibling of the map, while the map itself is lazy and client-only, so at
+   * the moment a row is clicked there may be no map function to call. Parking
+   * the request as state lets the canvas pick it up whenever it is ready, and
+   * keeps the store free of function references.
+   */
+  pendingFocusH3: string | null;
+  /**
+   * Where the open cell came from.
+   *
+   * The dock jumps to the detail tab for a map click, because a click on the
+   * map is a question about that cell and nothing else is showing the
+   * answer. It deliberately does not jump for a shortlist click: the reader
+   * is walking a list, and swapping the list out from under them on the
+   * first row would make the second row cost two clicks.
+   */
+  selectionOrigin: "map" | "list" | null;
   toggleLayer: (id: LayerId) => void;
   setLayerOpacity: (id: LayerId, opacity: number) => void;
   setPreset: (preset: PresetName) => void;
@@ -190,6 +245,12 @@ interface MapStore {
   /** `base` seeds the override on first edit, from the preset's own weights. */
   setWeight: (key: SubscoreKey, value: number, base: Weights) => void;
   resetWeights: () => void;
+  setRankedCells: (cells: RankedCell[] | null) => void;
+  setSelectionOrigin: (origin: "map" | "list" | null) => void;
+  setSelection: (selection: SelectionState | null) => void;
+  /** Called by the dock. Consumed and cleared by the canvas. */
+  focusCell: (h3Index: string) => void;
+  clearPendingFocus: () => void;
 }
 
 export const useMapStore = create<MapStore>((set) => ({
@@ -200,6 +261,10 @@ export const useMapStore = create<MapStore>((set) => ({
   hotspotStats: null,
   hotspotParams: INITIAL_HOTSPOT_PARAMS,
   presets: null,
+  rankedCells: null,
+  selection: null,
+  pendingFocusH3: null,
+  selectionOrigin: null,
   toggleLayer: (id) =>
     set((state) => ({
       layers: {
@@ -217,13 +282,29 @@ export const useMapStore = create<MapStore>((set) => ({
   customWeights: null,
   // Switching use case discards weight edits: carrying a warehouse-tuned
   // zoning weight into retail would silently misrepresent the retail preset.
-  setPreset: (preset) => set({ preset, customWeights: null, hotspotStats: null }),
+  setPreset: (preset) =>
+    set({
+      preset,
+      customWeights: null,
+      hotspotStats: null,
+      // Both describe the outgoing preset. Subscores and hard constraints are
+      // preset-specific, so keeping them would caption the new use case with
+      // the previous one's answer until the refetch lands.
+      rankedCells: null,
+      selection: null,
+      selectionOrigin: null,
+    }),
   setEligibleOnly: (eligibleOnly) => set({ eligibleOnly }),
   setWeight: (key, value, base) =>
     set((state) => ({
       customWeights: { ...(state.customWeights ?? base), [key]: value },
     })),
   resetWeights: () => set({ customWeights: null }),
+  setRankedCells: (rankedCells) => set({ rankedCells }),
+  setSelection: (selection) => set({ selection }),
+  focusCell: (pendingFocusH3) => set({ pendingFocusH3, selectionOrigin: "list" }),
+  setSelectionOrigin: (selectionOrigin) => set({ selectionOrigin }),
+  clearPendingFocus: () => set({ pendingFocusH3: null }),
   setHeatmapStats: (heatmapStats) => set({ heatmapStats }),
   setHotspotStats: (hotspotStats) => set({ hotspotStats }),
   // Stats are dropped on every parameter change: they describe the response

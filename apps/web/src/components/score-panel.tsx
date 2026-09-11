@@ -20,6 +20,9 @@ import {
   type GridAnalytics,
 } from "@/lib/score-analytics";
 
+import { text } from "./panel-styles";
+import SectionLabel from "./section-label";
+
 /**
  * Floating score panel.
  *
@@ -62,16 +65,13 @@ function DeltaBar({ delta, scale }: { delta: number; scale: number }) {
   return (
     <div className="relative h-1.5 flex-1 rounded-full bg-muted/60">
       <div className="absolute inset-y-0 left-1/2 w-px bg-border" />
+      {/* Accent for gains, destructive for drags. Both are theme tokens now,
+          so the bar cannot drift from the rest of the chrome the way the two
+          hand-picked hexes here previously did. Neither leans on hue alone:
+          each is also signed by the side of the baseline it grows from. */}
       <div
-        className="absolute inset-y-0 rounded-full"
-        style={{
-          width: `${width}%`,
-          [positive ? "left" : "right"]: "50%",
-          // Ramp brightest step for gains, status-critical for drags: the two
-          // read as opposite without relying on hue alone, since each is also
-          // signed by which side of the baseline it sits on.
-          backgroundColor: positive ? "#86b6ef" : "#d03b3b",
-        }}
+        className={`absolute inset-y-0 rounded-full ${positive ? "bg-primary" : "bg-destructive"}`}
+        style={{ width: `${width}%`, [positive ? "left" : "right"]: "50%" }}
       />
     </div>
   );
@@ -80,7 +80,7 @@ function DeltaBar({ delta, scale }: { delta: number; scale: number }) {
 function formatConstraintValue(value: unknown): string {
   if (Array.isArray(value))
     return value.map(formatConstraintValue).join(" or ");
-  if (value === null || value === undefined) return "—";
+  if (value === null || value === undefined) return "-";
   if (typeof value === "boolean") return value ? "yes" : "no";
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);
@@ -105,34 +105,34 @@ export default function ScorePanel({
     ? Math.max(...waterfall.contributions.map((c) => Math.abs(c.delta)), 0.01)
     : 0;
 
+  // No positioning or elevation here any more. This is the body of the
+  // results dock's "This site" tab, so the dock owns width, scrolling and
+  // surface. That also retires the `top-20` / `xl:top-4` breakpoint dance,
+  // which only existed because a floating panel and the centred preset
+  // picker fought for the same strip of map below ~1068px.
   return (
-    // `top-20` below xl drops the panel under the centred preset picker: at a
-    // map width under ~1068px a centred picker and a 20rem right-aligned panel
-    // would otherwise overlap. At xl and above there is room for both at top-4.
-    <aside className="scrollbar-subtle pointer-events-auto absolute top-20 right-16 max-h-[calc(100%-6rem)] w-80 max-w-[calc(100%-5rem)] overflow-y-auto rounded-lg border border-border bg-card/95 p-4 shadow-xl backdrop-blur xl:top-4 xl:max-h-[calc(100%-2rem)]">
+    <div className="p-4">
       {isPending ? (
-        <p className="flex items-center gap-2 text-sm text-muted-foreground">
+        <p className="flex items-center gap-2 text-[13px] text-muted-foreground">
           <LoaderCircleIcon className="size-4 shrink-0 animate-spin" />
-          Scoring this location…
+          Scoring…
         </p>
       ) : error ? (
         <div>
-          <p className="flex items-center gap-1.5 text-sm font-medium text-destructive">
+          <p className="flex items-center gap-1.5 text-[13px] font-medium text-destructive">
             <TriangleAlertIcon className="size-4 shrink-0" />
             Location unavailable
           </p>
-          <p className="mt-1 text-sm text-muted-foreground">{error.message}</p>
+          <p className="mt-1 text-[13px] text-muted-foreground">{error.message}</p>
         </div>
       ) : data ? (
         <div>
           <div className="flex items-end justify-between gap-3">
             <div>
-              <p className="text-[10px] font-medium tracking-[0.08em] text-muted-foreground uppercase">
-                Site score
-              </p>
+              <SectionLabel as="p">Score</SectionLabel>
               <div className="flex items-baseline gap-2">
-                <span className="text-3xl font-semibold tabular-nums">
-                  {data.score == null ? "—" : data.score.toFixed(1)}
+                <span className="font-mono text-3xl font-medium tracking-tight tabular-nums">
+                  {data.score == null ? "-" : data.score.toFixed(1)}
                 </span>
                 {percentile != null ? (
                   <span className="text-lg font-medium text-muted-foreground">
@@ -144,39 +144,33 @@ export default function ScorePanel({
             {/* Icon + label, never color alone — this is a status cue, and hue
                 on its own does not survive colorblindness or a grayscale print. */}
             <span
-              className="flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-xs"
-              style={
+              className={`flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-[11px] font-medium ${
                 data.eligible
-                  ? { backgroundColor: "#0ca30c1f", color: "#4ade80" }
-                  : { backgroundColor: "#fab2191f", color: "#fbbf24" }
-              }
+                  ? "bg-success/12 text-success ring-1 ring-success/25"
+                  : "bg-warning/12 text-warning ring-1 ring-warning/25"
+              }`}
             >
               {data.eligible ? (
                 <CircleCheckIcon className="size-3.5 shrink-0" />
               ) : (
                 <CircleAlertIcon className="size-3.5 shrink-0" />
               )}
-              {data.eligible ? "Eligible" : "Constraints failed"}
+              {data.eligible ? "Workable" : "Breaks a rule"}
             </span>
           </div>
 
           {percentile != null ? (
-            <p className="mt-1 text-[11px] text-muted-foreground">
-              Better than {percentile.toFixed(0)}% of {analytics!.cellCount}{" "}
-              Austin cells
+            <p className={`mt-1 ${text.hint}`}>
+              Beats {percentile.toFixed(0)}% of the {analytics!.cellCount} places scored in Austin
             </p>
           ) : null}
 
           {waterfall ? (
             <div className="mt-4">
-              <p className="text-[10px] font-medium tracking-[0.08em] text-muted-foreground uppercase">
-                Why
-              </p>
-              <div className="mt-1 flex items-baseline justify-between text-[11px] text-muted-foreground">
-                <span>Average cell</span>
-                <span className="tabular-nums">
-                  {waterfall.baseline.toFixed(1)}
-                </span>
+              <SectionLabel as="p">Why this score</SectionLabel>
+              <div className={`mt-1.5 flex items-baseline justify-between ${text.caption}`}>
+                <span>Typical place</span>
+                <span className="font-mono tabular-nums">{waterfall.baseline.toFixed(1)}</span>
               </div>
 
               <div className="mt-1.5 space-y-1.5">
@@ -185,13 +179,14 @@ export default function ScorePanel({
                     key={c.key}
                     className="flex items-center gap-2 text-[11px]"
                   >
-                    <span className="w-20 shrink-0 truncate text-muted-foreground">
+                    <span className="w-24 shrink-0 truncate text-muted-foreground">
                       {SUBSCORE_LABELS[c.key as SubscoreKey]}
                     </span>
                     <DeltaBar delta={c.delta} scale={scale} />
                     <span
-                      className="w-10 shrink-0 text-right tabular-nums"
-                      style={{ color: c.delta >= 0 ? "#86b6ef" : "#e66767" }}
+                      className={`w-10 shrink-0 text-right font-mono tabular-nums ${
+                        c.delta >= 0 ? "text-primary" : "text-destructive"
+                      }`}
                     >
                       {c.delta >= 0 ? "+" : ""}
                       {c.delta.toFixed(1)}
@@ -202,7 +197,7 @@ export default function ScorePanel({
 
               <div className="mt-2 flex items-baseline justify-between border-t border-border pt-1.5 text-[11px]">
                 <span className="text-muted-foreground">This site</span>
-                <span className="font-medium tabular-nums">
+                <span className="font-mono font-medium tabular-nums">
                   {waterfall.total.toFixed(1)}
                 </span>
               </div>
@@ -210,9 +205,7 @@ export default function ScorePanel({
           ) : null}
 
           <div className="mt-4">
-            <p className="text-[10px] font-medium tracking-[0.08em] text-muted-foreground uppercase">
-              Constraints
-            </p>
+            <SectionLabel as="p">Hard rules</SectionLabel>
             <div className="mt-1.5 space-y-1.5">
               {data.constraints.map((constraint) => (
                 <div
@@ -220,21 +213,15 @@ export default function ScorePanel({
                   className="flex items-start gap-2 text-xs"
                 >
                   {constraint.pass ? (
-                    <CheckIcon
-                      className="mt-0.5 size-3.5 shrink-0"
-                      style={{ color: "#0ca30c" }}
-                    />
+                    <CheckIcon className="mt-0.5 size-3.5 shrink-0 text-success" />
                   ) : (
-                    <XIcon
-                      className="mt-0.5 size-3.5 shrink-0"
-                      style={{ color: "#d03b3b" }}
-                    />
+                    <XIcon className="mt-0.5 size-3.5 shrink-0 text-destructive" />
                   )}
                   <span className="min-w-0 text-muted-foreground">
                     <span className="block">{constraint.label}</span>
-                    <span className="block text-[10px] text-muted-foreground/70">
-                      Actual: {formatConstraintValue(constraint.actual)} ·
-                      Required: {formatConstraintValue(constraint.required)}
+                    <span className="mt-0.5 block font-mono text-[10.5px] text-muted-foreground">
+                      {formatConstraintValue(constraint.actual)} vs{" "}
+                      {formatConstraintValue(constraint.required)} required
                     </span>
                   </span>
                 </div>
@@ -242,15 +229,15 @@ export default function ScorePanel({
             </div>
           </div>
 
-          <p className="mt-3 truncate font-mono text-[10px] text-muted-foreground/60">
+          <p className="mt-4 truncate border-t border-border pt-2.5 font-mono text-[10.5px] text-muted-foreground">
             {data.h3_index}
           </p>
         </div>
       ) : (
-        <p className="text-sm text-muted-foreground">
-          Click anywhere in Austin to score that location.
+        <p className="text-[13px] text-muted-foreground">
+          Click anywhere in Austin to score it.
         </p>
       )}
-    </aside>
+    </div>
   );
 }

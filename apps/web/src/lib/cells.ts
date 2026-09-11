@@ -1,4 +1,6 @@
+import type { AppRouter } from "@wherehouse/api/routers/index";
 import type { HeatmapResponse, PresetName } from "@wherehouse/api/geo/client";
+import type { inferRouterOutputs } from "@trpc/server";
 
 /**
  * Client-side scoring over the real heatmap payload.
@@ -15,6 +17,20 @@ import type { HeatmapResponse, PresetName } from "@wherehouse/api/geo/client";
 
 export type { PresetName };
 export type HeatmapCell = HeatmapResponse["cells"][number];
+/**
+ * One scored location, as the client actually receives it.
+ *
+ * Inferred from the tRPC router rather than from the OpenAPI schema. The two
+ * disagree: the generated `ScoreResponse` marks a constraint's `actual` and
+ * `required` as required-but-unknown, while what survives the tRPC boundary
+ * has them optional. Deriving from the router types the value that reaches
+ * this code, so the panel cannot be written against a shape it never sees.
+ *
+ * Carries subscores and hard-constraint results but no composite: the client
+ * weights it, which is why an open panel re-scores on a slider drag without
+ * a refetch.
+ */
+export type ScoredCell = inferRouterOutputs<AppRouter>["geo"]["score"];
 export type Subscores = HeatmapCell["subscores"];
 export type SubscoreKey = keyof Subscores;
 export type Weights = Partial<Record<SubscoreKey, number>>;
@@ -33,13 +49,36 @@ const _assertSubscoresExhaustive: (typeof SUBSCORE_KEYS)[number] =
   null as unknown as SubscoreKey;
 void _assertSubscoresExhaustive;
 
+/**
+ * What each scoring dimension is called on screen.
+ *
+ * Named for what they mean to someone choosing a site, not for the columns
+ * they come from. "Demographics" and "POI" are the pipeline's words; nobody
+ * picking a warehouse location thinks in them.
+ *
+ * Every label is phrased so that **more is better**, because the composite
+ * is a higher-is-better score and the bars, deltas and rankings all read
+ * that way. That is why flood is "Flood safety" rather than the
+ * "Flood risk" it used to say: a cell scoring 90 there is a *safe* one, and
+ * the old label announced the opposite of what the number meant.
+ */
 export const SUBSCORE_LABELS: Record<SubscoreKey, string> = {
-  demographics: "Demographics",
-  transport: "Transport",
-  poi: "Points of interest",
-  zoning: "Zoning",
-  flood: "Flood risk",
+  demographics: "People nearby",
+  transport: "Transport access",
+  poi: "Nearby businesses",
+  zoning: "Zoning fit",
+  flood: "Flood safety",
   aqi: "Air quality",
+};
+
+/** One line on what the dimension actually measures, for the priority rows. */
+export const SUBSCORE_HINTS: Record<SubscoreKey, string> = {
+  demographics: "Residents and daytime population in reach",
+  transport: "Road, highway and transit connections",
+  poi: "Competitors, complements and anchors around the site",
+  zoning: "How well permitted land use matches this activity",
+  flood: "Distance from mapped flood hazard areas",
+  aqi: "Measured air quality at the site",
 };
 
 export const PRESET_LABELS: Record<PresetName, string> = {

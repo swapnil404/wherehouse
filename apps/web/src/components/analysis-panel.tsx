@@ -2,6 +2,9 @@ import { Checkbox } from "@wherehouse/ui/components/checkbox";
 import { Label } from "@wherehouse/ui/components/label";
 import { Slider } from "@wherehouse/ui/components/slider";
 
+import { SlidersHorizontalIcon } from "lucide-react";
+import { useState } from "react";
+
 import {
   HOTSPOT_COLORS,
   HOTSPOT_METHODS,
@@ -9,6 +12,8 @@ import {
   type HotspotMethod,
 } from "@/lib/hotspots";
 import { ANALYSIS_META, useMapStore, type AnalysisLayerId } from "@/stores/map-store";
+
+import { text } from "./panel-styles";
 
 function Swatch({ hex }: { hex: string }) {
   return (
@@ -40,10 +45,8 @@ function ParamSlider({
   return (
     <div className="mt-2">
       <div className="flex items-baseline justify-between gap-2">
-        <span className="text-[11px] text-muted-foreground">{label}</span>
-        <span className="text-[11px] tabular-nums text-muted-foreground">
-          {format(value)}
-        </span>
+        <span className={text.caption}>{label}</span>
+        <span className={`font-mono ${text.numeric}`}>{format(value)}</span>
       </div>
       <Slider
         aria-label={label}
@@ -55,6 +58,27 @@ function ParamSlider({
           if (typeof next === "number") onChange(next);
         }}
       />
+    </div>
+  );
+}
+
+/** Matches the "Adjust priorities" affordance, so both hidden knob sets open the same way. */
+function FineTune({ children }: { children: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  if (!children) return null;
+
+  return (
+    <div className="mt-2">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex items-center gap-1.5 rounded-md text-[11px] font-medium transition-colors hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring/50 focus-visible:outline-none"
+      >
+        <SlidersHorizontalIcon className="size-3" />
+        {open ? "Done" : "Fine-tune"}
+      </button>
+      {open ? <div className="mt-1">{children}</div> : null}
     </div>
   );
 }
@@ -72,11 +96,11 @@ function AnalysisRow({ id, children }: { id: AnalysisLayerId; children?: React.R
           checked={layer.visible}
           onCheckedChange={() => toggleLayer(id)}
         />
-        <Label htmlFor={`analysis-${id}`} className="flex-1 cursor-pointer text-sm">
+        <Label htmlFor={`analysis-${id}`} className={`flex-1 cursor-pointer ${text.body}`}>
           {meta.label}
         </Label>
       </div>
-      <p className="mt-0.5 pl-6.5 text-[11px] text-muted-foreground/70">{meta.hint}</p>
+      <p className={`mt-1 pl-6.5 ${text.hint}`}>{meta.hint}</p>
       {layer.visible ? <div className="pl-6.5">{children}</div> : null}
     </div>
   );
@@ -120,12 +144,10 @@ export default function AnalysisPanel() {
   const candidates = cellsAtOrAbove(params.threshold);
 
   return (
+    // The heading lives on the rail's disclosure now, so the section does not
+    // announce itself twice.
     <div>
-      <h2 className="text-[10px] font-medium tracking-[0.08em] text-muted-foreground uppercase">
-        Analysis
-      </h2>
-
-      <div className="mt-2">
+      <div>
         <AnalysisRow id="hotspots">
           <div className="mt-2 grid grid-cols-3 gap-1">
             {HOTSPOT_METHODS.map((option) => {
@@ -138,80 +160,17 @@ export default function AnalysisPanel() {
                   onClick={() => setParams({ method: option.id as HotspotMethod })}
                   className={
                     active
-                      ? "rounded-md border border-border bg-accent px-1.5 py-1 text-[10px] font-medium text-accent-foreground"
-                      : "rounded-md border border-transparent px-1.5 py-1 text-[10px] text-muted-foreground hover:border-border"
+                      ? "rounded-md bg-accent/15 px-1.5 py-1 text-[11px] font-medium text-foreground ring-1 ring-accent"
+                      : "rounded-md px-1.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
                   }
                 >
-                  {option.id === "gi_star" ? "Gi*" : option.id === "dbscan" ? "DBSCAN" : "Bins"}
+                  {option.label}
                 </button>
               );
             })}
           </div>
 
-          <p className="mt-1.5 text-[11px] leading-snug text-muted-foreground/70">
-            {meta.blurb}
-          </p>
-
-          {/* Only the parameters the active method actually reads. Showing
-              DBSCAN's epsilon while Gi* is selected would imply it does
-              something, and the request would ignore it. */}
-          {params.method === "gi_star" ? (
-            <ParamSlider
-              label="Neighbourhood"
-              value={params.k}
-              min={1}
-              max={4}
-              step={1}
-              format={(v) => `${v} ring${v === 1 ? "" : "s"}`}
-              onChange={(k) => setParams({ k })}
-            />
-          ) : null}
-
-          {params.method === "dbscan" ? (
-            <>
-              <ParamSlider
-                label="Candidate score"
-                value={params.threshold}
-                min={0}
-                max={100}
-                step={5}
-                format={(v) => `≥ ${v}`}
-                onChange={(threshold) => setParams({ threshold })}
-              />
-              <p className="text-[11px] leading-snug text-muted-foreground/70">
-                {candidates === null ? (
-                  "Waiting for the grid…"
-                ) : candidates === 0 ? (
-                  <span className="text-destructive">
-                    No cell scores this high
-                    {maxScore == null ? "" : ` — the grid tops out at ${maxScore.toFixed(1)}`}.
-                  </span>
-                ) : (
-                  `${candidates} candidate cell${candidates === 1 ? "" : "s"}${
-                    maxScore == null ? "" : ` · top score ${maxScore.toFixed(1)}`
-                  }`
-                )}
-              </p>
-              <ParamSlider
-                label="Cluster radius"
-                value={params.epsKm}
-                min={0.5}
-                max={5}
-                step={0.5}
-                format={(v) => `${v.toFixed(1)} km`}
-                onChange={(epsKm) => setParams({ epsKm })}
-              />
-              <ParamSlider
-                label="Minimum cells"
-                value={params.minSamples}
-                min={2}
-                max={20}
-                step={1}
-                format={(v) => `${v}`}
-                onChange={(minSamples) => setParams({ minSamples })}
-              />
-            </>
-          ) : null}
+          <p className={`mt-2 ${text.hint}`}>{meta.blurb}</p>
 
           <ul className="mt-2 space-y-1">
             {meta.painted.map((painted) => (
@@ -219,42 +178,105 @@ export default function AnalysisPanel() {
                 <Swatch
                   hex={painted.tone === "hot" ? HOTSPOT_COLORS.hot : HOTSPOT_COLORS.cold}
                 />
-                <span className="flex-1 text-[11px] text-muted-foreground">
-                  {painted.label}
-                </span>
-                <span className="text-[11px] tabular-nums text-muted-foreground">
-                  {stats ? stats.counts[painted.classification] : "—"}
+                <span className={`flex-1 ${text.caption}`}>{painted.label}</span>
+                <span className={`font-mono ${text.numeric}`}>
+                  {stats ? stats.counts[painted.classification] : "-"}
                 </span>
               </li>
             ))}
           </ul>
 
           {params.method === "dbscan" && stats ? (
-            <p className="mt-1.5 text-[11px] leading-snug text-muted-foreground/70">
+            <p className={`mt-2 ${text.hint}`}>
               {stats.clusters === 0
-                ? "No clusters — lower the candidate score, widen the radius, or reduce the minimum cells."
-                : `${stats.clusters} cluster${stats.clusters === 1 ? "" : "s"} found`}
+                ? "Nothing grouped up. Try a lower minimum score, a wider spread, or a smaller group size."
+                : `${stats.clusters} area${stats.clusters === 1 ? "" : "s"} found`}
             </p>
           ) : null}
+
+          {/* The knobs behind a door. Each is a real parameter of the method
+              and each has a defensible default, so the resting state should
+              be the default rather than four sliders asking the reader to
+              have an opinion about a neighbourhood radius in kilometres.
+              Only the parameters the active method reads are shown: offering
+              a spread control while "Proven" is selected would imply it does
+              something, and the request would ignore it. */}
+          <FineTune>
+            {params.method === "gi_star" ? (
+              <ParamSlider
+                label="How far to look around each place"
+                value={params.k}
+                min={1}
+                max={4}
+                step={1}
+                format={(v) => `${v} ring${v === 1 ? "" : "s"}`}
+                onChange={(k) => setParams({ k })}
+              />
+            ) : null}
+
+            {params.method === "dbscan" ? (
+              <>
+                <ParamSlider
+                  label="Minimum score to count"
+                  value={params.threshold}
+                  min={0}
+                  max={100}
+                  step={5}
+                  format={(v) => `${v}+`}
+                  onChange={(threshold) => setParams({ threshold })}
+                />
+                <p className={`mt-1 ${text.hint}`}>
+                  {candidates === null ? (
+                    "Waiting for scores…"
+                  ) : candidates === 0 ? (
+                    <span className="text-destructive">
+                      Nowhere scores this high
+                      {maxScore == null ? "." : `. The best is ${maxScore.toFixed(1)}.`}
+                    </span>
+                  ) : (
+                    `${candidates} place${candidates === 1 ? "" : "s"} qualify${
+                      maxScore == null ? "" : `, best is ${maxScore.toFixed(1)}`
+                    }`
+                  )}
+                </p>
+                <ParamSlider
+                  label="How spread out a group can be"
+                  value={params.epsKm}
+                  min={0.5}
+                  max={5}
+                  step={0.5}
+                  format={(v) => `${v.toFixed(1)} km`}
+                  onChange={(epsKm) => setParams({ epsKm })}
+                />
+                <ParamSlider
+                  label="Smallest group worth showing"
+                  value={params.minSamples}
+                  min={2}
+                  max={20}
+                  step={1}
+                  format={(v) => `${v} places`}
+                  onChange={(minSamples) => setParams({ minSamples })}
+                />
+              </>
+            ) : null}
+          </FineTune>
         </AnalysisRow>
 
         <AnalysisRow id="underserved">
           <ul className="mt-2 space-y-1">
             <li className="flex items-center gap-2">
               <Swatch hex={HOTSPOT_COLORS.underserved} />
-              <span className="flex-1 text-[11px] text-muted-foreground">
-                High demand, low supply
-              </span>
-              <span className="text-[11px] tabular-nums text-muted-foreground">
-                {stats ? stats.underserved : "—"}
+              <span className={`flex-1 ${text.caption}`}>Lots of people, few businesses</span>
+              <span className={`font-mono ${text.numeric}`}>
+                {stats ? stats.underserved : "-"}
               </span>
             </li>
           </ul>
           {/* The API is explicit that this is general retail and services.
               There is no charger-supply data, so it must never be read as EV
               underservice even while the EV preset is active. */}
-          <p className="mt-1.5 text-[11px] leading-snug text-muted-foreground/70">
-            General retail and services only — not EV charging supply.
+          <p className={`mt-2 ${text.hint}`}>
+Counts shops and services generally, not charging points.
           </p>
         </AnalysisRow>
       </div>
