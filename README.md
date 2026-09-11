@@ -139,6 +139,43 @@ inactive while its rows and provenance are inserted. The `geo_active_dataset` po
 same transaction only after the complete dataset is present, so the application cannot observe a
 partially loaded refresh.
 
+## Precomputed Reachability
+
+Catchments use offline OSRM duration matrices. Runtime requests do not call OSRM. The pipeline packs
+each source H3 cell, travel mode, and time band into one `cell_reach` row containing the reachable H3
+indexes and their total population.
+
+Prepare separate car and foot graphs from the cached Texas OpenStreetMap extract. Each preparation
+can take a while and writes ignored files under `pipeline/data/processed/osrm/`:
+
+```bash
+just osrm-prepare car
+just osrm-prepare foot
+```
+
+Start both local table services, build the checkpointed matrices, validate them, and load the packed
+rows into the same active Neon dataset used by FastAPI:
+
+```bash
+just osrm-start
+just reach-build
+just reach-validate
+just reach-load
+just osrm-stop
+```
+
+Car bands are 10, 20, and 30 minutes. Foot bands are 10 and 20 minutes. Completed matrix blocks are
+checkpointed under `pipeline/data/processed/reachability/checkpoints/`, so rerunning `reach-build`
+resumes after an interruption. Use `just reach-build --refresh` only when you intentionally need to
+replace every block. Validation checks the active dataset ID, complete source coverage, nested time
+bands, destination counts, and population totals before Neon is changed.
+
+At runtime, the authenticated `geo.catchment` tRPC query reads these rows directly from Neon. Pass
+the selected resolution-8 `h3Index` and either `car` or `foot`; the response contains the available
+time bands, reachable H3 indexes, destination counts, and catchment population. The browser derives
+hex boundaries from the indexes, so the response does not include polygon geometry and does not call
+OSRM or FastAPI.
+
 ## PMTiles Map Layers
 
 The map's roads, zoning, flood, buildings, and classified POI overlays are built separately from
