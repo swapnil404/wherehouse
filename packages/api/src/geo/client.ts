@@ -4,6 +4,7 @@ import type { components, operations } from "./openapi.generated";
 
 type PresetsOperation = operations["get_presets_v1_presets_get"];
 type HeatmapOperation = operations["get_heatmap_v1_heatmap_get"];
+type HotspotsOperation = operations["compute_hotspots_v1_hotspots_post"];
 
 /**
  * Derived from the generated schema rather than hand-listed, so adding a
@@ -20,6 +21,10 @@ export type ScoreRequest = components["schemas"]["ScoreRequest"];
 export type ScoreResponse = components["schemas"]["ScoreResponse"];
 export type BatchScoreRequest = components["schemas"]["BatchScoreRequest"];
 export type BatchScoreResponse = components["schemas"]["BatchScoreResponse"];
+export type HotspotsRequest =
+  HotspotsOperation["requestBody"]["content"]["application/json"];
+export type HotspotsResponse =
+  HotspotsOperation["responses"][200]["content"]["application/json"];
 
 interface GeoErrorEnvelope {
   code?: string;
@@ -86,6 +91,14 @@ export function getPresets(): Promise<GeoPresets> {
 export function getHeatmap(preset: PresetName): Promise<HeatmapResponse> {
   const query = new URLSearchParams({ preset });
   return request<HeatmapResponse>(`/v1/heatmap?${query}`);
+}
+
+export function getHotspots(input: HotspotsRequest): Promise<HotspotsResponse> {
+  return request<HotspotsResponse>("/v1/hotspots", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
 }
 
 export function scorePoint(input: ScoreRequest): Promise<ScoreResponse> {

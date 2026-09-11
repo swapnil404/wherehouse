@@ -5,6 +5,7 @@ import { protectedProcedure, publicProcedure, router } from "../index";
 import {
   GeoServiceError,
   getHeatmap,
+  getHotspots,
   getPresets,
   scoreBatch,
   scorePoint,
@@ -30,6 +31,7 @@ const _assertPresetsExhaustive: (typeof PRESET_NAMES)[number] =
 void _assertPresetsExhaustive;
 
 const presetSchema = z.enum(PRESET_NAMES);
+const hotspotMethodSchema = z.enum(["gi_star", "dbscan", "binning"]);
 
 function mapGeoError(error: unknown): never {
   if (!(error instanceof GeoServiceError)) {
@@ -65,6 +67,23 @@ export const appRouter = router({
       .query(async ({ input }) => {
         try {
           return await getHeatmap(input.preset);
+        } catch (error) {
+          return mapGeoError(error);
+        }
+      }),
+    hotspots: protectedProcedure
+      .input(z.object({
+        method: hotspotMethodSchema.default("gi_star"),
+        preset: presetSchema.default("warehouse"),
+        weights: weightsSchema.nullish(),
+        k: z.number().int().min(1).max(4).default(2),
+        threshold: z.number().min(0).max(100).default(70),
+        eps_km: z.number().min(0.1).max(10).default(1.5),
+        min_samples: z.number().int().min(2).max(50).default(4),
+      }))
+      .mutation(async ({ input }) => {
+        try {
+          return await getHotspots(input);
         } catch (error) {
           return mapGeoError(error);
         }
