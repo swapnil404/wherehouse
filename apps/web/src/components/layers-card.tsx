@@ -3,9 +3,9 @@ import { Label } from "@wherehouse/ui/components/label";
 import { Separator } from "@wherehouse/ui/components/separator";
 import { Slider } from "@wherehouse/ui/components/slider";
 import { CircleDashedIcon, LayersIcon } from "lucide-react";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 
-import { useDismiss } from "@/lib/use-dismiss";
+import { useEscapeToClose } from "@/lib/use-escape-to-close";
 import { LAYER_META, useMapStore, type LayerId } from "@/stores/map-store";
 
 import AnalysisPanel from "./analysis-panel";
@@ -118,14 +118,19 @@ function LayerRow({ id }: { id: LayerId }) {
  *
  * A count on the button so the closed state still reports whether anything
  * is on. Without it, switching a layer off and forgetting is invisible.
+ *
+ * It stays open until the button or Escape closes it. Dismissing on an
+ * outside press is the usual popover behaviour and was actively hostile
+ * here: the map is what is outside the panel, and clicking the map is the
+ * app's main action, so ticking an overlay and then scoring a cell shut the
+ * panel every single time.
  */
 export default function LayersCard() {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
   const layers = useMapStore((s) => s.layers);
 
   const close = useCallback(() => setOpen(false), []);
-  useDismiss(ref, open, close);
+  useEscapeToClose(open, close);
 
   const activeCount =
     LAYER_META.filter((m) => m.available && layers[m.id].visible).length +
@@ -133,7 +138,7 @@ export default function LayersCard() {
     (layers.underserved.visible ? 1 : 0);
 
   return (
-    <div ref={ref} className="pointer-events-auto relative">
+    <div className="pointer-events-auto relative">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}

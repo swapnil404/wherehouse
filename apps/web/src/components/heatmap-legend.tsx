@@ -28,6 +28,10 @@ export default function HeatmapLegend() {
   const span = SCORE_BINS[SCORE_BINS.length - 1].max - SCORE_BINS[0].min;
 
   return (
+    /* Back on the left edge with everything else. The offset here existed
+       only to clear the zoom bar, which now sits at the bottom centre; the
+       scale bar is all that is left in this corner and it occupies the
+       bottom strip, below `bottom-11`. */
     <div className="pointer-events-none absolute bottom-11 left-4 z-10">
       <div className={`pointer-events-auto w-60 p-3 ${panelSurface}`}>
         <div className="flex items-baseline justify-between gap-2">

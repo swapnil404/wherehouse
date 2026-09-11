@@ -111,3 +111,168 @@
     transform: translateX(300%);
   }
 }
+
+/**
+ * MapLibre's own controls, themed.
+ *
+ * MapLibre ships its navigation, scale and attribution chrome as white boxes
+ * with `#333` icons, a 4px radius and a hardcoded `#0096ff` focus ring. On a
+ * pure-black theme with a 20px radius that reads as a browser widget someone
+ * left on the map, and it sits inches from app-built chrome using the same
+ * glass surface, which makes the mismatch obvious rather than merely plain.
+ *
+ * Every value here is a theme token, so these follow the palette the same way
+ * the React chrome does. The surface deliberately mirrors `panelSurface` in
+ * `components/panel-styles.ts`: 80% popover, a real blur, a hairline ring and
+ * the theme's own shadow. The controls then read as the same material as the
+ * legend and the results card.
+ *
+ * The zoom and compass icons are `background-image` data URIs with the fill
+ * baked in, so they cannot be recoloured by setting `color`. Inverting is the
+ * one move that recolours all three without re-authoring MapLibre's SVGs:
+ * `#333` becomes `#ccc`, and the resting opacity brings it down to about the
+ * muted-foreground the app's other icon buttons use, brightening to full on
+ * hover exactly as those do.
+ */
+
+.maplibregl-map {
+  /* The library hardcodes a Helvetica stack, which is why the scale bar was
+     the one piece of text on screen not in the app's typeface. */
+  font-family: var(--font-sans);
+}
+
+.maplibregl-ctrl-group {
+  background: color-mix(in oklab, var(--popover) 80%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-radius: var(--radius-md);
+  /* Clips the buttons to the group's corners, so the first and last do not
+     need their own radii to avoid poking out of the rounded container. */
+  overflow: hidden;
+}
+
+.maplibregl-ctrl-group:not(:empty) {
+  box-shadow:
+    0 0 0 1px var(--border),
+    var(--shadow-xl);
+}
+
+.maplibregl-ctrl-group button + button {
+  border-top: 1px solid var(--border);
+}
+
+.maplibregl-ctrl-group button:hover {
+  background-color: color-mix(in oklab, var(--foreground) 6%, transparent);
+}
+
+.maplibregl-ctrl-group button .maplibregl-ctrl-icon {
+  filter: invert(1);
+  opacity: 0.7;
+  transition: opacity 150ms;
+}
+
+.maplibregl-ctrl-group button:hover .maplibregl-ctrl-icon {
+  opacity: 1;
+}
+
+/* The library's focus ring is a fixed blue. Match the app's, which is the
+   same `--ring` every button and input in the rail already focuses with. */
+.maplibregl-ctrl-group button:focus,
+.maplibregl-ctrl-group button:focus:focus-visible,
+.maplibregl-ctrl-attrib-button:focus {
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--ring) 50%, transparent);
+}
+
+.maplibregl-ctrl-scale {
+  background-color: color-mix(in oklab, var(--popover) 80%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border);
+  border-top: none;
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+
+.maplibregl-ctrl-attrib {
+  background-color: color-mix(in oklab, var(--popover) 70%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-radius: var(--radius-sm) 0 0 0;
+  color: var(--muted-foreground);
+}
+
+.maplibregl-ctrl-attrib a {
+  color: var(--muted-foreground);
+}
+
+.maplibregl-ctrl-attrib a:hover {
+  color: var(--foreground);
+}
+
+.maplibregl-ctrl-attrib-button {
+  filter: invert(1);
+  opacity: 0.7;
+}
+
+/**
+ * The collapsed attribution pill.
+ *
+ * Needs its own rule rather than inheriting the one above: MapLibre styles it
+ * as `.maplibregl-ctrl-attrib.maplibregl-compact`, two classes to the single
+ * class of the expanded selector, so it outranks it and the pill stayed white
+ * with black text at the widths where it collapses. Its "i" glyph is a
+ * background image on `::after`, which is a separate element from the
+ * `-attrib-button` the expanded form uses, so it needs inverting separately.
+ */
+.maplibregl-ctrl-attrib.maplibregl-compact {
+  background-color: color-mix(in oklab, var(--popover) 80%, transparent);
+  color: var(--muted-foreground);
+  border-radius: var(--radius-md);
+}
+
+.maplibregl-ctrl-attrib.maplibregl-compact-show .maplibregl-ctrl-attrib-button {
+  background-color: color-mix(in oklab, var(--foreground) 8%, transparent);
+}
+
+.maplibregl-ctrl-attrib.maplibregl-compact::after {
+  filter: invert(1);
+  opacity: 0.7;
+}
+
+/**
+ * Forced-colors mode substitutes system colours for everything above, which
+ * is the point of it. The icon filters are the one thing it cannot undo, and
+ * inverting a system-recoloured glyph would hide it, so those alone are
+ * dropped and MapLibre's own high-contrast rules take over.
+ */
+@media (forced-colors: active) {
+  .maplibregl-ctrl-group button .maplibregl-ctrl-icon,
+  .maplibregl-ctrl-attrib.maplibregl-compact::after,
+  .maplibregl-ctrl-attrib-button {
+    filter: none;
+    opacity: 1;
+  }
+}
+
+
+/**
+ * The zoom control, laid out horizontally.
+ *
+ * MapLibre builds `NavigationControl` as a vertical stack: its buttons are
+ * `display: block` and each one after the first takes a top border. A flex
+ * row turns it on its side, and the divider has to move axis with it or the
+ * buttons end up separated along the wrong edge.
+ *
+ * Scoped to `.wh-zoom-control`, the node `map-canvas.tsx` mounts the control
+ * into, so every themed-control rule above still applies and only the axis
+ * changes here.
+ */
+.wh-zoom-control .maplibregl-ctrl-group {
+  display: flex;
+}
+
+.wh-zoom-control .maplibregl-ctrl-group button + button {
+  border-top: none;
+  border-left: 1px solid var(--border);
+}

@@ -197,6 +197,18 @@ type DeckAnchor = {
 export default function MapCanvas() {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
+  /**
+   * Where the zoom control is mounted.
+   *
+   * MapLibre only offers four control positions, all corners, and the zoom
+   * bar is wanted bottom-centre. Rather than reimplement it, the control is
+   * instantiated directly and its element appended here: `onAdd` returns the
+   * DOM node and `onRemove` tears it down, which is the whole of the
+   * `IControl` contract. That keeps the parts worth keeping, notably the
+   * compass, the pitch visualisation and the buttons disabling themselves at
+   * the style's zoom limits, while this component owns the placement.
+   */
+  const zoomHostRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<MapboxOverlay | null>(null);
   const [deckAnchor, setDeckAnchor] = useState<DeckAnchor>(null);
 
@@ -211,6 +223,7 @@ export default function MapCanvas() {
 
   const hotspotParams = useMapStore((s) => s.hotspotParams);
   const setHotspotStats = useMapStore((s) => s.setHotspotStats);
+  const setHotspotStatus = useMapStore((s) => s.setHotspotStatus);
   const analysisOn = mapLayers.hotspots.visible || mapLayers.underserved.visible;
 
   const setRankedCells = useMapStore((s) => s.setRankedCells);
@@ -279,6 +292,16 @@ export default function MapCanvas() {
     enabled: analysisOn,
     staleTime: Infinity,
   });
+
+  // The panel and the map both need to distinguish "working" and "failed"
+  // from "found nothing", and neither can read the query from here.
+  const hotspotError = hotspotsQuery.error;
+  useEffect(() => {
+    setHotspotStatus({
+      pending: analysisOn && hotspotsQuery.isPending,
+      error: hotspotError ? hotspotError.message : null,
+    });
+  }, [analysisOn, hotspotsQuery.isPending, hotspotError, setHotspotStatus]);
 
   const hotspotCells = (hotspotsQuery.data?.cells ?? EMPTY_HOTSPOT_CELLS) as HotspotCell[];
   const underservedCells = (hotspotsQuery.data?.underserved ??
@@ -403,17 +426,24 @@ export default function MapCanvas() {
       attributionControl: { compact: true },
     });
 
-    // Bottom-right, stacked over the attribution. The top-right corner
-    // belongs to the results card, and this control sitting there is what
-    // forced the old score panel's `right-16` offset.
-    map.addControl(
-      new maplibregl.NavigationControl({ visualizePitch: true }),
-      "bottom-right",
-    );
-    map.addControl(
-      new maplibregl.ScaleControl({ unit: "metric" }),
-      "bottom-left",
-    );
+    // Bottom-left, beside the score key.
+    //
+    // The whole right edge belongs to the results card, which grows downward
+    // from the top and on the "This site" tab reaches most of the way to the
+    // bottom, so it covered this control there. Bottom-right is the same
+    // edge; the left column is the only side nothing expands into.
+    //
+    // The scale bar is the only thing left in this corner, and it sits in the
+    // very bottom strip, clear of the score key above it. Default `maxWidth`
+    // restored: it was narrowed only to fit beside the key when the zoom bar
+    // shared this corner.
+    map.addControl(new maplibregl.ScaleControl({ unit: "metric" }), "bottom-left");
+
+    // Zoom goes bottom-centre instead, mounted into this component's own node
+    // rather than one of MapLibre's four corner containers. See `zoomHostRef`.
+    const nav = new maplibregl.NavigationControl({ visualizePitch: true });
+    zoomHostRef.current?.appendChild(nav.onAdd(map));
+
     map.getCanvas().style.cursor = "crosshair";
 
     /**
@@ -551,13 +581,18 @@ export default function MapCanvas() {
 
         if (layer?.id === "underserved-cells") {
           const cell = object as UnderservedCell;
+          // `demand` is population_density_percentile * 100, so it is a rank
+          // against the rest of the grid, not a headcount. Labelled "People
+          // nearby" with a bare number it read as one: "87" looked like 87
+          // residents in a cell covering 0.74 square kilometres. `supply`
+          // really is a count, so it stays bare.
           return {
             html: `
               <div style="min-width:190px">
                 <div style="font-weight:600;margin-bottom:6px">Underserved</div>
                 <div style="display:flex;justify-content:space-between;gap:12px">
-                  <span style="color:var(--muted-foreground)">People nearby</span>
-                  <span style="font-family:var(--font-mono);font-variant-numeric:tabular-nums">${cell.demand.toFixed(0)}</span>
+                  <span style="color:var(--muted-foreground)">Population density</span>
+                  <span style="font-family:var(--font-mono);font-variant-numeric:tabular-nums">${cell.demand.toFixed(0)}th pctl</span>
                 </div>
                 <div style="display:flex;justify-content:space-between;gap:12px">
                   <span style="color:var(--muted-foreground)">Businesses here</span>
@@ -608,6 +643,9 @@ export default function MapCanvas() {
 
     return () => {
       overlayRef.current = null;
+      // Before `map.remove()`: the control detaches its own listeners from
+      // the map, and doing that after the map is gone is a needless race.
+      nav.onRemove();
       map.remove();
       mapRef.current = null;
     };
@@ -860,6 +898,23 @@ export default function MapCanvas() {
           ) : null
         ) : null}
 
+        {/* The analysis overlays draw nothing at all while their one request
+            is in flight or after it fails, so without this the reader ticks
+            a box and watches the map not change. */}
+        {analysisOn ? (
+          hotspotsQuery.isPending ? (
+            <p className={`${panelPill} text-muted-foreground`}>
+              <LoaderCircleIcon className="size-3.5 shrink-0 animate-spin" />
+              Looking for patterns…
+            </p>
+          ) : hotspotError ? (
+            <p className={`${panelPill} text-destructive ring-destructive/35`}>
+              <TriangleAlertIcon className="size-3.5 shrink-0" />
+              Could not find patterns. {hotspotError.message}
+            </p>
+          ) : null
+        ) : null}
+
         {/* POIs are individual premises, not an area wash, and the archive
             thins them hard at low zoom — so the layer reads as almost empty
             on the opening view even though it is working. Saying so beats
@@ -870,6 +925,11 @@ export default function MapCanvas() {
             Points of interest are individual local places. Zoom in and pan to see more
           </p>
         ) : null}
+
+        {/* Last in the column, so the notices above stack on top of it rather
+            than landing on it. `index.css` lays the mounted control out
+            horizontally; MapLibre builds it as a vertical stack. */}
+        <div ref={zoomHostRef} className="wh-zoom-control" />
       </div>
 
     </div>

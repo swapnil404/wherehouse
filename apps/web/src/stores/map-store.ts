@@ -183,6 +183,17 @@ interface MapStore {
   heatmapStats: HeatmapStats | null;
   /** Painted-class tallies for the analysis legends. `null` until fetched. */
   hotspotStats: HotspotStats | null;
+  /**
+   * Whether `/v1/hotspots` is in flight or has failed.
+   *
+   * Published separately from `hotspotStats` because a null `hotspotStats`
+   * is ambiguous: it means "not fetched yet", "fetching" and "the request
+   * failed" all at once. The panel used to render every one of those as a
+   * dash next to each class, so a failed call was indistinguishable from a
+   * layer that had simply found nothing, and the map drew an empty overlay
+   * with no explanation.
+   */
+  hotspotStatus: { pending: boolean; error: string | null };
   hotspotParams: HotspotParams;
   /**
    * The `/v1/presets` payload from the *running* sidecar — both the list of
@@ -240,6 +251,7 @@ interface MapStore {
   setEligibleOnly: (eligibleOnly: boolean) => void;
   setHeatmapStats: (stats: HeatmapStats | null) => void;
   setHotspotStats: (stats: HotspotStats | null) => void;
+  setHotspotStatus: (status: { pending: boolean; error: string | null }) => void;
   setHotspotParams: (params: Partial<HotspotParams>) => void;
   setPresets: (presets: Partial<Record<PresetName, Weights>>) => void;
   /** `base` seeds the override on first edit, from the preset's own weights. */
@@ -259,6 +271,7 @@ export const useMapStore = create<MapStore>((set) => ({
   eligibleOnly: false,
   heatmapStats: null,
   hotspotStats: null,
+  hotspotStatus: { pending: false, error: null },
   hotspotParams: INITIAL_HOTSPOT_PARAMS,
   presets: null,
   rankedCells: null,
@@ -307,6 +320,7 @@ export const useMapStore = create<MapStore>((set) => ({
   clearPendingFocus: () => set({ pendingFocusH3: null }),
   setHeatmapStats: (heatmapStats) => set({ heatmapStats }),
   setHotspotStats: (hotspotStats) => set({ hotspotStats }),
+  setHotspotStatus: (hotspotStatus) => set({ hotspotStatus }),
   // Stats are dropped on every parameter change: they describe the response
   // that is now stale, and leaving them up would caption the new legend with
   // the old counts while the refetch is in flight.

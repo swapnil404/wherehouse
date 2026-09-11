@@ -52,33 +52,53 @@ void _assertSubscoresExhaustive;
 /**
  * What each scoring dimension is called on screen.
  *
- * Named for what they mean to someone choosing a site, not for the columns
- * they come from. "Demographics" and "POI" are the pipeline's words; nobody
- * picking a warehouse location thinks in them.
+ * Plain words rather than the pipeline's column names, but the plain word has
+ * to be **true to the formula** in `apps/fastapi/scoring.py`. An earlier pass
+ * traded accuracy for readability and shipped three labels that described
+ * something the score does not compute:
  *
- * Every label is phrased so that **more is better**, because the composite
- * is a higher-is-better score and the bars, deltas and rankings all read
- * that way. That is why flood is "Flood safety" rather than the
- * "Flood risk" it used to say: a cell scoring 90 there is a *safe* one, and
- * the old label announced the opposite of what the number meant.
+ * - "People nearby" for `demographics`, which is 40% population density but
+ *   also 35% how close local median income sits to this use case's target
+ *   band and 25% the same for median age. A cell can score low there while
+ *   being dense, because the residents are the wrong profile, and a label
+ *   promising a headcount makes that look like a bug.
+ * - "Transport access" for `transport`, which is 40% road density and 60%
+ *   decay on distance to the nearest highway. **There is no transit term at
+ *   all.** Anyone siting retail around a rail stop would have read the label
+ *   and trusted a number that never considered it.
+ * - "Distance from mapped flood hazard areas" for `flood`, which is
+ *   categorical, not continuous: 0 inside the SFHA, 100 in zone X, 55
+ *   otherwise. Nothing is measured in metres.
+ *
+ * Labels stay phrased so that **more is better**, matching a higher-is-better
+ * composite and the bars, deltas and rankings built on it. That is why flood
+ * reads as safety rather than risk.
  */
 export const SUBSCORE_LABELS: Record<SubscoreKey, string> = {
-  demographics: "People nearby",
-  transport: "Transport access",
+  demographics: "Resident fit",
+  transport: "Road access",
   poi: "Nearby businesses",
   zoning: "Zoning fit",
   flood: "Flood safety",
   aqi: "Air quality",
 };
 
-/** One line on what the dimension actually measures, for the priority rows. */
+/**
+ * One line on what the dimension actually measures, for the priority rows.
+ *
+ * These are the disclosure for the compressions above: the label is short
+ * enough to fit a column header, the hint is where the formula gets stated
+ * honestly enough that nobody makes a siting decision on a misreading.
+ */
 export const SUBSCORE_HINTS: Record<SubscoreKey, string> = {
-  demographics: "Residents and daytime population in reach",
-  transport: "Road, highway and transit connections",
-  poi: "Competitors, complements and anchors around the site",
-  zoning: "How well permitted land use matches this activity",
-  flood: "Distance from mapped flood hazard areas",
-  aqi: "Measured air quality at the site",
+  demographics:
+    "Population density, plus how closely local income and age match this use case",
+  transport:
+    "Road density and distance to the nearest highway. Does not include transit",
+  poi: "Competitor count against an ideal, plus complements and anchors nearby",
+  zoning: "Whether the dominant zoning class permits this activity",
+  flood: "Flood-zone class, not distance. Zero inside the 100-year floodplain",
+  aqi: "Air quality at the site, ranked against the rest of the city",
 };
 
 export const PRESET_LABELS: Record<PresetName, string> = {

@@ -2,7 +2,7 @@ import { Checkbox } from "@wherehouse/ui/components/checkbox";
 import { Label } from "@wherehouse/ui/components/label";
 import { Slider } from "@wherehouse/ui/components/slider";
 
-import { SlidersHorizontalIcon } from "lucide-react";
+import { LoaderCircleIcon, SlidersHorizontalIcon, TriangleAlertIcon } from "lucide-react";
 import { useState } from "react";
 
 import {
@@ -62,6 +62,20 @@ function ParamSlider({
   );
 }
 
+/**
+ * A painted-class count, or an honest stand-in for one.
+ *
+ * A bare dash was used for every not-a-number case, which read as "zero
+ * found" and hid the two that are not: the request is still running, or it
+ * failed. Neither is a finding about Austin.
+ */
+function Tally({ value }: { value?: number }) {
+  const status = useMapStore((s) => s.hotspotStatus);
+  if (status.error) return <span className="text-destructive">n/a</span>;
+  if (status.pending) return <span aria-label="Loading">…</span>;
+  return <span>{value ?? "-"}</span>;
+}
+
 /** Matches the "Adjust priorities" affordance, so both hidden knob sets open the same way. */
 function FineTune({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
@@ -87,6 +101,7 @@ function AnalysisRow({ id, children }: { id: AnalysisLayerId; children?: React.R
   const meta = ANALYSIS_META.find((m) => m.id === id)!;
   const layer = useMapStore((s) => s.layers[id]);
   const toggleLayer = useMapStore((s) => s.toggleLayer);
+  const status = useMapStore((s) => s.hotspotStatus);
 
   return (
     <div className="py-1">
@@ -101,6 +116,22 @@ function AnalysisRow({ id, children }: { id: AnalysisLayerId; children?: React.R
         </Label>
       </div>
       <p className={`mt-1 pl-6.5 ${text.hint}`}>{meta.hint}</p>
+
+      {/* Both overlays are drawn from one `/v1/hotspots` call, so a failure
+          or a wait belongs here rather than being inferred from the tallies
+          below going blank. */}
+      {layer.visible && status.error ? (
+        <p className="mt-1.5 flex items-start gap-1.5 pl-6.5 text-[11px] leading-snug text-destructive">
+          <TriangleAlertIcon className="mt-px size-3 shrink-0" />
+          Could not work this out. {status.error}
+        </p>
+      ) : layer.visible && status.pending ? (
+        <p className={`mt-1.5 flex items-center gap-1.5 pl-6.5 ${text.hint}`}>
+          <LoaderCircleIcon className="size-3 shrink-0 animate-spin" />
+          Working…
+        </p>
+      ) : null}
+
       {layer.visible ? <div className="pl-6.5">{children}</div> : null}
     </div>
   );
@@ -180,7 +211,7 @@ export default function AnalysisPanel() {
                 />
                 <span className={`flex-1 ${text.caption}`}>{painted.label}</span>
                 <span className={`font-mono ${text.numeric}`}>
-                  {stats ? stats.counts[painted.classification] : "-"}
+                  <Tally value={stats?.counts[painted.classification]} />
                 </span>
               </li>
             ))}
@@ -268,7 +299,7 @@ export default function AnalysisPanel() {
               <Swatch hex={HOTSPOT_COLORS.underserved} />
               <span className={`flex-1 ${text.caption}`}>Lots of people, few businesses</span>
               <span className={`font-mono ${text.numeric}`}>
-                {stats ? stats.underserved : "-"}
+                <Tally value={stats?.underserved} />
               </span>
             </li>
           </ul>
