@@ -1,6 +1,7 @@
 import { create } from "zustand";
 
 import type { PresetName, SubscoreKey, Weights } from "@/lib/cells";
+import type { HotspotMethod } from "@/lib/hotspots";
 import type { GridAnalytics } from "@/lib/score-analytics";
 import {
   PMTILES_BASE_URL,
@@ -9,7 +10,14 @@ import {
   type TileLayerId,
 } from "@/lib/tile-layers";
 
-export type LayerId = "heatmap" | TileLayerId;
+/**
+ * Server-computed analytics. Separate from the tile layers because they are
+ * fetched per preset and per parameter rather than served as a static
+ * archive, and they draw above everything else.
+ */
+export type AnalysisLayerId = "hotspots" | "underserved";
+
+export type LayerId = "heatmap" | AnalysisLayerId | TileLayerId;
 
 export interface LayerState {
   visible: boolean;
@@ -52,12 +60,71 @@ export const LAYER_META: readonly LayerMeta[] = [
 ] as const;
 
 /**
- * Every tile overlay starts hidden. They draw *above* the hexes, so switching
- * one on by default would mean the product's own layer opens partly covered.
- * Their opacities come from the specs rather than being restated here.
+ * Rendered in their own rail section rather than mixed into the tile list:
+ * they answer a different question, and the section gives the method picker
+ * and its parameters somewhere to live next to the toggle they affect.
+ */
+export const ANALYSIS_META: readonly { id: AnalysisLayerId; label: string; hint: string }[] = [
+  {
+    id: "hotspots",
+    label: "Clusters",
+    hint: "Statistically significant clusters of the current composite",
+  },
+  {
+    id: "underserved",
+    label: "Underserved areas",
+    hint: "Top-quartile residents, bottom-quartile POI supply",
+  },
+] as const;
+
+/**
+ * Defaults mirror the tRPC input defaults, so an untouched panel sends
+ * exactly what the router would have filled in anyway.
+ */
+export interface HotspotParams {
+  method: HotspotMethod;
+  /** Gi* neighbourhood radius in H3 rings. */
+  k: number;
+  /** DBSCAN: minimum composite score for a cell to be a candidate. */
+  threshold: number;
+  /** DBSCAN: neighbourhood radius in kilometres. */
+  epsKm: number;
+  /** DBSCAN: minimum candidates before a cluster is admitted. */
+  minSamples: number;
+}
+
+const INITIAL_HOTSPOT_PARAMS: HotspotParams = {
+  method: "gi_star",
+  k: 2,
+  // Deliberately *not* the API's default of 70. The composite tops out at
+  // 69.5 on the active warehouse dataset (p95 = 56.2, p99 = 65.6), so 70
+  // matches zero cells and DBSCAN returns 1,021 noise and no clusters — the
+  // layer would open looking broken. 55 sits around p95 and yields 4
+  // clusters over 41 cells. The panel captions the slider with the live
+  // distribution so this stays honest if the data or weights move.
+  threshold: 55,
+  epsKm: 1.5,
+  minSamples: 4,
+};
+
+/** Published by the canvas so the rail can label the legend with real counts. */
+export interface HotspotStats {
+  /** Painted-class tallies, keyed by the API's `classification` value. */
+  counts: Record<string, number>;
+  /** DBSCAN only; zero for the other methods. */
+  clusters: number;
+  underserved: number;
+}
+
+/**
+ * Every overlay starts hidden. They draw *above* the hexes, so switching one
+ * on by default would mean the product's own layer opens partly covered.
+ * Tile opacities come from the specs rather than being restated here.
  */
 const INITIAL_LAYERS: Record<LayerId, LayerState> = {
   heatmap: { visible: true, opacity: 0.8 },
+  hotspots: { visible: false, opacity: 0.9 },
+  underserved: { visible: false, opacity: 0.75 },
   ...(Object.fromEntries(
     TILE_LAYERS.map((layer) => [
       layer.id,
@@ -86,6 +153,9 @@ interface MapStore {
    * render server-side without issuing an authenticated query of its own.
    */
   heatmapStats: HeatmapStats | null;
+  /** Painted-class tallies for the analysis legends. `null` until fetched. */
+  hotspotStats: HotspotStats | null;
+  hotspotParams: HotspotParams;
   /**
    * The `/v1/presets` payload from the *running* sidecar — both the list of
    * use cases and their weights. Not hardcoded: the deployed sidecar can lag
@@ -114,6 +184,8 @@ interface MapStore {
   setPreset: (preset: PresetName) => void;
   setEligibleOnly: (eligibleOnly: boolean) => void;
   setHeatmapStats: (stats: HeatmapStats | null) => void;
+  setHotspotStats: (stats: HotspotStats | null) => void;
+  setHotspotParams: (params: Partial<HotspotParams>) => void;
   setPresets: (presets: Partial<Record<PresetName, Weights>>) => void;
   /** `base` seeds the override on first edit, from the preset's own weights. */
   setWeight: (key: SubscoreKey, value: number, base: Weights) => void;
@@ -125,6 +197,8 @@ export const useMapStore = create<MapStore>((set) => ({
   preset: "warehouse",
   eligibleOnly: false,
   heatmapStats: null,
+  hotspotStats: null,
+  hotspotParams: INITIAL_HOTSPOT_PARAMS,
   presets: null,
   toggleLayer: (id) =>
     set((state) => ({
@@ -143,7 +217,7 @@ export const useMapStore = create<MapStore>((set) => ({
   customWeights: null,
   // Switching use case discards weight edits: carrying a warehouse-tuned
   // zoning weight into retail would silently misrepresent the retail preset.
-  setPreset: (preset) => set({ preset, customWeights: null }),
+  setPreset: (preset) => set({ preset, customWeights: null, hotspotStats: null }),
   setEligibleOnly: (eligibleOnly) => set({ eligibleOnly }),
   setWeight: (key, value, base) =>
     set((state) => ({
@@ -151,6 +225,15 @@ export const useMapStore = create<MapStore>((set) => ({
     })),
   resetWeights: () => set({ customWeights: null }),
   setHeatmapStats: (heatmapStats) => set({ heatmapStats }),
+  setHotspotStats: (hotspotStats) => set({ hotspotStats }),
+  // Stats are dropped on every parameter change: they describe the response
+  // that is now stale, and leaving them up would caption the new legend with
+  // the old counts while the refetch is in flight.
+  setHotspotParams: (params) =>
+    set((state) => ({
+      hotspotParams: { ...state.hotspotParams, ...params },
+      hotspotStats: null,
+    })),
   setPresets: (presets) =>
     set((state) => {
       const served = Object.keys(presets) as PresetName[];

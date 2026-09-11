@@ -4,6 +4,7 @@ import { Separator } from "@wherehouse/ui/components/separator";
 import { Slider } from "@wherehouse/ui/components/slider";
 import { CircleDashedIcon } from "lucide-react";
 
+import AnalysisPanel from "./analysis-panel";
 import WeightEditor from "./weight-editor";
 import { LAYER_META, useMapStore, type LayerId } from "@/stores/map-store";
 
@@ -119,6 +120,10 @@ export default function LayerPanel() {
           ))}
         </div>
       </div>
+
+      <Separator />
+
+      <AnalysisPanel />
 
       <Separator />
 

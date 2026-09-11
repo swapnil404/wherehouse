@@ -1,4 +1,5 @@
 import { H3HexagonLayer } from "@deck.gl/geo-layers";
+import { PolygonLayer } from "@deck.gl/layers";
 import { MapboxOverlay } from "@deck.gl/mapbox";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
@@ -26,10 +27,24 @@ import {
   binIndexForScore,
   colorForScore,
 } from "@/lib/heatmap-palette";
+import {
+  COLD_FILL,
+  COLD_LINE,
+  HOT_FILL,
+  HOT_LINE,
+  UNDERSERVED_FILL,
+  UNDERSERVED_LINE,
+  buildRegions,
+  countByClassification,
+  type HotspotCell,
+  type HotspotRegion,
+  type UnderservedCell,
+} from "@/lib/hotspots";
 import { computeGridAnalytics } from "@/lib/score-analytics";
+import { useDebouncedValue } from "@/lib/use-debounced-value";
 import { PMTILES_BASE_URL, TILE_LAYERS, archiveUrl } from "@/lib/tile-layers";
 import { useMapStore } from "@/stores/map-store";
-import { useTRPC } from "@/utils/trpc";
+import { useTRPC, useTRPCClient } from "@/utils/trpc";
 
 /**
  * MapLibre touches `window` at import time, so this module must only ever be
@@ -44,6 +59,20 @@ const BASEMAP_STYLE =
   "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
 
 const EMPTY_CELLS: HeatmapCell[] = [];
+const EMPTY_HOTSPOT_CELLS: HotspotCell[] = [];
+const EMPTY_UNDERSERVED: UnderservedCell[] = [];
+
+/** Shared by every tooltip the overlay renders, so they cannot drift apart. */
+const TOOLTIP_STYLE = {
+  backgroundColor: "#1a1a19",
+  color: "#ffffff",
+  border: "1px solid rgba(255,255,255,0.10)",
+  borderRadius: "8px",
+  padding: "10px 12px",
+  fontSize: "12px",
+  fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif",
+  boxShadow: "0 8px 24px rgba(0,0,0,0.45)",
+};
 
 /**
  * `addProtocol` registers globally on maplibre, not per map, so this runs once
@@ -64,13 +93,21 @@ function registerPMTilesProtocol() {
 }
 
 /**
- * Where deck's hexes get inserted into the basemap's layer stack.
+ * Where deck's layers get inserted into the basemap's layer stack.
  *
- * `null` means the style is not ready yet. `{ beforeId: undefined }` means it
- * is ready but nothing was found to anchor against, so deck draws on top —
- * which is the old overlaid behaviour and a safe fallback rather than a crash.
+ * Two anchors, because the hexes and the analysis overlays belong at different
+ * depths: the score heatmap sits *under* the PMTiles overlays, while clusters
+ * and underserved areas are findings drawn on top of everything but the
+ * basemap's labels.
+ *
+ * `null` means the style is not ready yet. An `undefined` id means it is ready
+ * but nothing was found to anchor against, so deck draws on top — the old
+ * overlaid behaviour, and a safe fallback rather than a crash.
  */
-type DeckAnchor = { beforeId: string | undefined } | null;
+type DeckAnchor = {
+  hexBeforeId: string | undefined;
+  analysisBeforeId: string | undefined;
+} | null;
 
 export default function MapCanvas() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -86,6 +123,10 @@ export default function MapCanvas() {
   const setHeatmapStats = useMapStore((s) => s.setHeatmapStats);
   const setPresets = useMapStore((s) => s.setPresets);
   const customWeights = useMapStore((s) => s.customWeights);
+
+  const hotspotParams = useMapStore((s) => s.hotspotParams);
+  const setHotspotStats = useMapStore((s) => s.setHotspotStats);
+  const analysisOn = mapLayers.hotspots.visible || mapLayers.underserved.visible;
 
   const scorePoint = useMutation(trpc.geo.score.mutationOptions());
   const scorePointRef = useRef(scorePoint.mutate);
@@ -112,6 +153,45 @@ export default function MapCanvas() {
   // so the map and the panel can never disagree about what weights are active.
   const weights = customWeights ?? presetWeights ?? ({} as Weights);
   const weightsReady = Object.keys(weights).length > 0;
+
+  // Gi* and DBSCAN run server-side across the whole grid, so unlike the
+  // heatmap they cannot be recomputed in the browser when a weight moves.
+  // Debouncing the value the request is keyed on keeps the heatmap instant
+  // while the clusters catch up after the drag settles, instead of firing one
+  // round trip per pointer move.
+  const debouncedWeights = useDebouncedValue(customWeights, 400);
+  const trpcClient = useTRPCClient();
+  const hotspotsQuery = useQuery({
+    queryKey: ["geo.hotspots", preset, hotspotParams, debouncedWeights],
+    // `geo.hotspots` is declared a tRPC mutation because it POSTs upstream,
+    // but it is a pure read. Driving it through the vanilla client inside a
+    // query buys caching and — the reason it matters here — makes React Query
+    // discard responses whose parameters are already stale, so a slow request
+    // for one threshold cannot land on top of a fast one for the next.
+    queryFn: () =>
+      trpcClient.geo.hotspots.mutate({
+        preset,
+        method: hotspotParams.method,
+        k: hotspotParams.k,
+        threshold: hotspotParams.threshold,
+        eps_km: hotspotParams.epsKm,
+        min_samples: hotspotParams.minSamples,
+        weights: debouncedWeights ?? undefined,
+      }),
+    // Only fetched once an analysis layer is actually switched on: it is the
+    // most expensive call the map makes, and most sessions never open it.
+    enabled: analysisOn,
+    staleTime: Infinity,
+  });
+
+  const hotspotCells = (hotspotsQuery.data?.cells ?? EMPTY_HOTSPOT_CELLS) as HotspotCell[];
+  const underservedCells = (hotspotsQuery.data?.underserved ??
+    EMPTY_UNDERSERVED) as UnderservedCell[];
+
+  const regions = useMemo(
+    () => buildRegions(hotspotCells, hotspotParams.method),
+    [hotspotCells, hotspotParams.method],
+  );
 
   // Publish the preset payload for the rail. Keys are narrowed against the
   // known labels so an unrecognized preset never becomes a button the client
@@ -214,7 +294,8 @@ export default function MapCanvas() {
       // overlay to sit under, so they anchor to the label boundary instead —
       // anchoring to a layer that was never added would throw in `addLayer`.
       setDeckAnchor({
-        beforeId: PMTILES_BASE_URL ? TILE_LAYERS[0].style.id : labelStart,
+        hexBeforeId: PMTILES_BASE_URL ? TILE_LAYERS[0].style.id : labelStart,
+        analysisBeforeId: labelStart,
       });
     });
 
@@ -241,10 +322,33 @@ export default function MapCanvas() {
     const overlay = new MapboxOverlay({
       interleaved: true,
       layers: [],
-      getTooltip: ({ object }) => {
-        const cell = object as HeatmapCell | undefined;
-        if (!cell) return null;
+      getTooltip: (info) => {
+        const { object, layer } = info;
+        if (!object) return null;
 
+        if (layer?.id === "underserved-cells") {
+          const cell = object as UnderservedCell;
+          return {
+            html: `
+              <div style="min-width:190px">
+                <div style="font-weight:600;margin-bottom:6px">Underserved</div>
+                <div style="display:flex;justify-content:space-between;gap:12px">
+                  <span style="color:#898781">Residents (percentile)</span>
+                  <span style="font-variant-numeric:tabular-nums">${cell.demand.toFixed(0)}</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;gap:12px">
+                  <span style="color:#898781">POIs in cell</span>
+                  <span style="font-variant-numeric:tabular-nums">${cell.supply}</span>
+                </div>
+                <div style="margin-top:6px;font-size:10px;color:#898781">
+                  General retail and services only
+                </div>
+              </div>`,
+            style: TOOLTIP_STYLE,
+          };
+        }
+
+        const cell = object as HeatmapCell;
         const score = compositeScore(cell.subscores, weightsRef.current);
         const rows = SUBSCORE_KEYS.map(
           (key) =>
@@ -268,16 +372,7 @@ export default function MapCanvas() {
               ${rows}
               <div style="margin-top:6px;font-size:10px;color:#898781">${cell.h3Index}</div>
             </div>`,
-          style: {
-            backgroundColor: "#1a1a19",
-            color: "#ffffff",
-            border: "1px solid rgba(255,255,255,0.10)",
-            borderRadius: "8px",
-            padding: "10px 12px",
-            fontSize: "12px",
-            fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif",
-            boxShadow: "0 8px 24px rgba(0,0,0,0.45)",
-          },
+          style: TOOLTIP_STYLE,
         };
       },
     });
@@ -304,7 +399,8 @@ export default function MapCanvas() {
     // not export the type that adds it. Spread rather than written inline:
     // that is what keeps TypeScript from rejecting it as an excess property,
     // without reaching for `as any` on the whole layer.
-    const placement = { beforeId: deckAnchor.beforeId };
+    const placement = { beforeId: deckAnchor.hexBeforeId };
+    const analysisPlacement = { beforeId: deckAnchor.analysisBeforeId };
 
     return [
       // The heatmap fill is conditional, but the selection ring below is not:
@@ -361,6 +457,55 @@ export default function MapCanvas() {
             }),
           ]
         : []),
+
+      // Individual hexes, not a dissolved area: each underserved cell carries
+      // its own demand and supply numbers, and keeping them separate is what
+      // lets the tooltip report them honestly. It also reads as a different
+      // form from the cluster outlines below, which is the whole reason the
+      // two can share a crowded palette.
+      ...(mapLayers.underserved.visible && underservedCells.length > 0
+        ? [
+            new H3HexagonLayer<UnderservedCell>({
+              ...analysisPlacement,
+              id: "underserved-cells",
+              data: underservedCells,
+              getHexagon: (d) => d.h3Index,
+              filled: true,
+              getFillColor: UNDERSERVED_FILL,
+              stroked: true,
+              getLineColor: UNDERSERVED_LINE,
+              lineWidthMinPixels: 1.5,
+              extruded: false,
+              opacity: mapLayers.underserved.opacity,
+              pickable: true,
+            }),
+          ]
+        : []),
+
+      // Dissolved cluster boundaries. Stroking each hexagon separately would
+      // draw a honeycomb and read as a grid rather than one cluster.
+      ...(mapLayers.hotspots.visible && regions.length > 0
+        ? [
+            new PolygonLayer<HotspotRegion>({
+              ...analysisPlacement,
+              id: "hotspot-regions",
+              data: regions,
+              getPolygon: (d) => d.rings,
+              filled: true,
+              getFillColor: (d) => (d.tone === "hot" ? HOT_FILL : COLD_FILL),
+              stroked: true,
+              getLineColor: (d) => (d.tone === "hot" ? HOT_LINE : COLD_LINE),
+              getLineWidth: 2,
+              lineWidthUnits: "pixels",
+              lineWidthMinPixels: 2,
+              opacity: mapLayers.hotspots.opacity,
+              // Deliberately not pickable. The outline's meaning is carried
+              // entirely by its color plus the rail's legend, and staying out
+              // of picking keeps the score hex underneath clickable.
+              pickable: false,
+            }),
+          ]
+        : []),
     ];
   }, [
     deckAnchor,
@@ -370,6 +515,12 @@ export default function MapCanvas() {
     weights,
     weightsReady,
     selectedH3,
+    mapLayers.underserved.visible,
+    mapLayers.underserved.opacity,
+    mapLayers.hotspots.visible,
+    mapLayers.hotspots.opacity,
+    underservedCells,
+    regions,
   ]);
 
   useEffect(() => {
@@ -397,6 +548,25 @@ export default function MapCanvas() {
       );
     }
   }, [deckAnchor, mapLayers]);
+
+  // Publish painted-class tallies so the rail can caption each legend swatch
+  // with a real count. Left alone while a refetch is in flight: the store
+  // already cleared them when the parameter changed, and writing partial
+  // numbers here would caption the new legend with the old response.
+  useEffect(() => {
+    if (!hotspotsQuery.data) return;
+    setHotspotStats({
+      counts: countByClassification(hotspotCells, hotspotParams.method),
+      clusters: hotspotsQuery.data.clusters.length,
+      underserved: underservedCells.length,
+    });
+  }, [
+    hotspotsQuery.data,
+    hotspotCells,
+    underservedCells,
+    hotspotParams.method,
+    setHotspotStats,
+  ]);
 
   // Publish band counts for the rail's legend. Derived from every cell, not
   // just the visible ones, so the distribution does not shift when the
