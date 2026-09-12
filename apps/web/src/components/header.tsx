@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { HexagonIcon, MapPinIcon } from "lucide-react";
+import { MapPinIcon } from "lucide-react";
 
 import UserMenu from "./user-menu";
 
@@ -23,11 +23,8 @@ export default function Header() {
         <Link
           to="/dashboard"
           aria-label="Wherehouse dashboard"
-          className="group flex shrink-0 items-center gap-2.5 rounded-md outline-none focus-visible:ring-1 focus-visible:ring-ring/50"
+          className="flex shrink-0 items-center rounded-md outline-none transition-opacity hover:opacity-80 focus-visible:ring-1 focus-visible:ring-ring/50"
         >
-          <span className="grid size-7 place-items-center rounded-md border border-primary/30 bg-primary/10 transition-colors group-hover:bg-primary/15">
-            <HexagonIcon className="size-3.5 text-primary" strokeWidth={2.2} aria-hidden />
-          </span>
           <span className="font-display text-sm font-semibold uppercase tracking-[0.09em]">Wherehouse</span>
         </Link>
 

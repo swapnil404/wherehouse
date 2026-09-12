@@ -84,6 +84,15 @@ const EMPTY_CELLS: HeatmapCell[] = [];
 const EMPTY_HOTSPOT_CELLS: HotspotCell[] = [];
 const EMPTY_UNDERSERVED: UnderservedCell[] = [];
 
+// Every analysis layer is a flat surface whose visual stacking is already
+// controlled by `beforeId` and array order. Leaving depth testing on makes
+// those coplanar polygons compete with MapLibre's basemap on some GPUs,
+// producing horizontal z-fighting stripes across otherwise solid hexes.
+const FLAT_LAYER_PARAMETERS = {
+  depthCompare: "always",
+  depthWriteEnabled: false,
+} as const;
+
 /**
  * POI names come from OpenStreetMap, so they are arbitrary user-contributed
  * strings that reach `setHTML` — "Sammie's" is harmless, a name containing
@@ -692,6 +701,7 @@ export default function MapCanvas() {
               ...placement,
               id: "score-heatmap",
               data: visibleCells,
+              parameters: FLAT_LAYER_PARAMETERS,
               getHexagon: (d) => d.h3Index,
               getFillColor: (d) =>
                 colorForScore(compositeScore(d.subscores, weights)),
@@ -718,6 +728,7 @@ export default function MapCanvas() {
               ...analysisPlacement,
               id: "catchment-bands",
               data: catchmentCells,
+              parameters: FLAT_LAYER_PARAMETERS,
               getHexagon: (cell) => cell.h3Index,
               getFillColor: (cell) => catchmentFill(cell.minutes),
               filled: true,
@@ -736,6 +747,7 @@ export default function MapCanvas() {
               ...analysisPlacement,
               id: "comparison-cells",
               data: comparisonSites,
+              parameters: FLAT_LAYER_PARAMETERS,
               getHexagon: (site) => site.h3_index,
               filled: false,
               stroked: true,
@@ -760,6 +772,7 @@ export default function MapCanvas() {
               ...analysisPlacement,
               id: "selected-cell",
               data: [{ h3Index: selectedH3 }],
+              parameters: FLAT_LAYER_PARAMETERS,
               getHexagon: (d) => d.h3Index,
               filled: false,
               stroked: true,
@@ -785,6 +798,7 @@ export default function MapCanvas() {
               ...analysisPlacement,
               id: "underserved-cells",
               data: underservedCells,
+              parameters: FLAT_LAYER_PARAMETERS,
               getHexagon: (d) => d.h3Index,
               filled: true,
               getFillColor: UNDERSERVED_FILL,
@@ -806,6 +820,7 @@ export default function MapCanvas() {
               ...analysisPlacement,
               id: "hotspot-regions",
               data: regions,
+              parameters: FLAT_LAYER_PARAMETERS,
               getPolygon: (d) => d.rings,
               filled: true,
               getFillColor: (d) => (d.tone === "hot" ? HOT_FILL : COLD_FILL),
