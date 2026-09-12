@@ -1,7 +1,7 @@
 import { ChevronLeftIcon, ChevronRightIcon, CircleAlertIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { SCORE_BINS, binIndexForScore } from "@/lib/heatmap-palette";
+import { SCORE_BINS, binIndexIn } from "@/lib/heatmap-palette";
 import { useMapStore } from "@/stores/map-store";
 
 import { text } from "./panel-styles";
@@ -94,7 +94,10 @@ export default function RankedList() {
       {filter}
       <ol className="flex flex-col p-2">
         {rows.map((cell, index) => {
-          const bin = SCORE_BINS[binIndexForScore(cell.score)];
+          // Always the score ramp, even when the map is painted by air
+          // quality. This list is ranked by composite score, so a swatch from
+          // the other ramp would colour a row by something it is not sorted on.
+          const bin = SCORE_BINS[binIndexIn(cell.score, SCORE_BINS)];
           const active = cell.h3Index === selectedH3;
 
           return (

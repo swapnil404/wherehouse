@@ -1,50 +1,87 @@
-export interface CatchmentCell {
-  h3Index: string;
-  minutes: number;
-}
+import { cellsToMultiPolygon } from "h3-js";
 
-interface CatchmentBandLike {
+/**
+ * Reachability, drawn as one contour.
+ *
+ * This used to paint every reachable hexagon with a translucent red fill, one
+ * shade per time band. It worked as a picture of coverage and failed at the
+ * thing the map is for: the score colours underneath are the product, and
+ * covering a third of the city with a second choropleth hid them exactly when
+ * the reader was comparing a site against its surroundings. So the cells are
+ * dissolved into their outline instead — the area is described by its
+ * boundary and nothing inside it is recoloured.
+ *
+ * **One band at a time.** An earlier pass drew every band up to the selected
+ * one, nested, on the theory that it read as an isochrone map. In use it read
+ * as a bug: moving from 10 to 20 minutes left the 10-minute ring on screen and
+ * added a second one around it, so the control looked like it was accumulating
+ * outlines rather than answering a question. The panel asks "how far in 20
+ * minutes", and the map now answers exactly that.
+ */
+
+export interface CatchmentBandLike {
   minutes: number;
   destinationH3Indexes: readonly string[];
 }
 
-const CATCHMENT_COLORS = {
-  10: { rgba: [255, 35, 45, 150], css: "rgb(255 35 45)" },
-  20: { rgba: [190, 24, 34, 115], css: "rgb(190 24 34)" },
-  30: { rgba: [105, 18, 26, 90], css: "rgb(105 18 26)" },
-} as const;
-
-const FALLBACK_COLOR = {
-  rgba: [255, 70, 78, 100],
-  css: "rgb(255 70 78)",
-} as const;
-
-function colorFor(minutes: number) {
-  return CATCHMENT_COLORS[minutes as keyof typeof CATCHMENT_COLORS] ?? FALLBACK_COLOR;
-}
-
-export function catchmentFill(minutes: number): [number, number, number, number] {
-  return [...colorFor(minutes).rgba];
-}
-
-export function catchmentCssColor(minutes: number): string {
-  return colorFor(minutes).css;
+/**
+ * One dissolved boundary. `rings[0]` is the outer ring and the rest are holes
+ * — pockets the road network cannot reach inside the time, which are real and
+ * worth drawing.
+ */
+export interface CatchmentRegion {
+  minutes: number;
+  rings: [number, number][][];
 }
 
 /**
- * Convert cumulative reachability bands into non-overlapping display rings.
- * A cell is assigned to the earliest band that can reach it.
+ * White, the same as the selected-cell ring.
+ *
+ * Deliberate: both marks answer "which part of the map am I asking about", so
+ * they share a colour and differ by form — a single hexagon against a
+ * dissolved area. It also keeps reachability out of the ramps entirely, where
+ * red now means score and cyan means a drawn study area.
+ *
+ * One weight for every band, not a ramp. The old per-band fade existed to
+ * separate nested contours; with a single outline on screen it would only mean
+ * that asking for a wider area got you a fainter answer.
  */
-export function buildCatchmentCells(
+export const CATCHMENT_LINE_COLOR: [number, number, number, number] = [255, 255, 255, 255];
+export const CATCHMENT_LINE_WIDTH = 2;
+
+/**
+ * Dissolve everything reachable within `minutes` into its outline.
+ *
+ * The set is the union of every band at or under the selected time, rebuilt
+ * here rather than taken from the payload. The API's bands are cumulative
+ * today, but a region built from an exclusive ring would come back as a donut
+ * with a spurious inner edge where the previous band ended.
+ *
+ * Returns an array because one selection can dissolve into several
+ * disconnected pieces — an area split by a river with no crossing inside the
+ * time is genuinely two shapes, and merging them would draw a boundary across
+ * water nobody can cross.
+ */
+export function buildCatchmentRegions(
   bands: readonly CatchmentBandLike[],
-  maxMinutes: number,
-): CatchmentCell[] {
-  const firstReach = new Map<string, number>();
-  for (const band of [...bands].sort((a, b) => a.minutes - b.minutes)) {
-    if (band.minutes > maxMinutes) continue;
-    for (const h3Index of band.destinationH3Indexes) {
-      if (!firstReach.has(h3Index)) firstReach.set(h3Index, band.minutes);
-    }
+  minutes: number,
+): CatchmentRegion[] {
+  // Only the selected band. An unmatched `minutes` draws nothing rather than
+  // falling back to a neighbouring band, so the outline can never describe a
+  // different time from the one the panel is reporting numbers for.
+  if (!bands.some((band) => band.minutes === minutes)) return [];
+
+  const members = new Set<string>();
+  for (const band of bands) {
+    if (band.minutes > minutes) continue;
+    for (const h3Index of band.destinationH3Indexes) members.add(h3Index);
   }
-  return [...firstReach].map(([h3Index, minutes]) => ({ h3Index, minutes }));
+  if (members.size === 0) return [];
+
+  // `true` asks for GeoJSON winding and [lng, lat] order, which is what
+  // deck.gl's PolygonLayer expects.
+  return cellsToMultiPolygon([...members], true).map((polygon) => ({
+    minutes,
+    rings: polygon as [number, number][][],
+  }));
 }

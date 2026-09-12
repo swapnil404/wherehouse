@@ -1,40 +1,88 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { gridDisk, latLngToCell } from "h3-js";
 
-import { buildCatchmentCells } from "./catchment";
+import {
+  CATCHMENT_LINE_COLOR,
+  CATCHMENT_LINE_WIDTH,
+  buildCatchmentRegions,
+} from "./catchment";
 
-describe("buildCatchmentCells", () => {
-  test("turns cumulative bands into earliest-reach rings", () => {
-    const cells = buildCatchmentCells(
-      [
-        { minutes: 20, destinationH3Indexes: ["a", "b", "c"] },
-        { minutes: 10, destinationH3Indexes: ["a"] },
-        { minutes: 30, destinationH3Indexes: ["a", "b", "c", "d"] },
-      ],
-      30,
+const CENTRE = latLngToCell(30.2672, -97.7431, 8);
+const NEAR = gridDisk(CENTRE, 1); // 7 cells
+const WIDE = gridDisk(CENTRE, 2); // 19 cells, containing NEAR
+
+const CUMULATIVE = [
+  { minutes: 10, destinationH3Indexes: NEAR },
+  { minutes: 20, destinationH3Indexes: WIDE },
+];
+
+describe("buildCatchmentRegions", () => {
+  test("draws only the selected band", () => {
+    // The whole point of the change: picking 20 minutes replaces the
+    // 10-minute outline rather than adding a second ring around it.
+    const regions = buildCatchmentRegions(CUMULATIVE, 20);
+    assert.deepEqual(
+      regions.map((region) => region.minutes),
+      [20],
     );
 
-    assert.deepEqual(cells, [
-      { h3Index: "a", minutes: 10 },
-      { h3Index: "b", minutes: 20 },
-      { h3Index: "c", minutes: 20 },
-      { h3Index: "d", minutes: 30 },
-    ]);
+    const nearer = buildCatchmentRegions(CUMULATIVE, 10);
+    assert.deepEqual(
+      nearer.map((region) => region.minutes),
+      [10],
+    );
   });
 
-  test("omits cells beyond the selected time", () => {
-    const cells = buildCatchmentCells(
-      [
-        { minutes: 10, destinationH3Indexes: ["a"] },
-        { minutes: 20, destinationH3Indexes: ["a", "b"] },
-        { minutes: 30, destinationH3Indexes: ["a", "b", "c"] },
-      ],
-      20,
-    );
+  test("the wider band encloses more ground than the nearer one", () => {
+    const span = (minutes: number) => {
+      const ring = buildCatchmentRegions(CUMULATIVE, minutes)[0].rings[0];
+      const lngs = ring.map((point) => point[0]);
+      return Math.max(...lngs) - Math.min(...lngs);
+    };
 
-    assert.deepEqual(cells, [
-      { h3Index: "a", minutes: 10 },
-      { h3Index: "b", minutes: 20 },
-    ]);
+    assert.ok(span(20) > span(10), "20 minutes should reach further than 10");
+  });
+
+  test("draws a closed ring", () => {
+    const region = buildCatchmentRegions(CUMULATIVE, 20)[0];
+    assert.ok(region.rings.length >= 1);
+    assert.ok(region.rings[0].length >= 3, "outer ring needs at least 3 points");
+  });
+
+  test("unions the nearer bands rather than trusting the payload", () => {
+    // The same area described with *exclusive* rings: the 20-minute band
+    // carries only the cells that band added. Dissolved on its own that is a
+    // donut, with a spurious inner edge where the 10-minute band ended.
+    const exclusive = [
+      { minutes: 10, destinationH3Indexes: NEAR },
+      { minutes: 20, destinationH3Indexes: WIDE.filter((cell) => !NEAR.includes(cell)) },
+    ];
+
+    const region = buildCatchmentRegions(exclusive, 20)[0];
+    assert.equal(region.rings.length, 1, "solid region, not a donut");
+  });
+
+  test("draws nothing rather than a different time when the band is missing", () => {
+    // A foot payload has no 30-minute band. Falling back to the widest
+    // available one would outline 20 minutes while the panel reported 30.
+    assert.deepEqual(buildCatchmentRegions(CUMULATIVE, 30), []);
+  });
+
+  test("returns nothing when reach is off or nothing is reachable", () => {
+    assert.deepEqual(buildCatchmentRegions([], 20), []);
+    assert.deepEqual(buildCatchmentRegions([{ minutes: 10, destinationH3Indexes: [] }], 10), []);
+  });
+});
+
+describe("contour styling", () => {
+  test("is opaque white, matching the selected-cell ring", () => {
+    assert.deepEqual(CATCHMENT_LINE_COLOR, [255, 255, 255, 255]);
+  });
+
+  test("is one weight for every band", () => {
+    // No ramp: the old per-band fade only separated nested contours, and with
+    // a single outline it would mean a wider question got a fainter answer.
+    assert.ok(CATCHMENT_LINE_WIDTH > 0);
   });
 });

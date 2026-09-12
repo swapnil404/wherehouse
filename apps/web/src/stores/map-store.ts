@@ -2,7 +2,9 @@ import { create } from "zustand";
 
 import type { PresetName, ScoredCell, SubscoreKey, Weights } from "@/lib/cells";
 import type { HotspotMethod } from "@/lib/hotspots";
+import type { GridMeasure } from "@/lib/heatmap-palette";
 import type { GridAnalytics } from "@/lib/score-analytics";
+import type { DrawMode, StudyArea } from "@/lib/study-area";
 import {
   PMTILES_BASE_URL,
   TILE_LAYERS,
@@ -49,7 +51,10 @@ const TILES_UNAVAILABLE_HINT = "Set VITE_PMTILES_BASE_URL to enable";
  * the way the map reads bottom-up.
  */
 export const LAYER_META: readonly LayerMeta[] = [
-  { id: "heatmap", label: "Score heatmap", available: true },
+  // Just "Heatmap": the row is a checkbox for whether the hexes are painted
+  // at all, and the picker nested under it says what they are painted by. A
+  // label naming one of the two measures would contradict the other.
+  { id: "heatmap", label: "Heatmap", available: true },
   ...TILE_LAYERS.map((layer): LayerMeta => ({
     id: layer.id,
     label: layer.label,
@@ -134,7 +139,7 @@ const INITIAL_LAYERS: Record<LayerId, LayerState> = {
 };
 
 export interface HeatmapStats {
-  /** Cells per score band, same order as `SCORE_BINS`. */
+  /** Cells per band, in the order of the active measure's own bins. */
   counts: number[];
   total: number;
   eligible: number;
@@ -247,9 +252,54 @@ interface MapStore {
    * first row would make the second row cost two clicks.
    */
   selectionOrigin: "map" | "list" | null;
+  /**
+   * Whether the reach bands are drawn and their numbers fetched.
+   *
+   * Off by default, following the same rule as every other overlay: the bands
+   * paint *above* the score hexes, so leaving them on meant every click
+   * covered the product's own layer with a red wash the reader had no way to
+   * dismiss. It also stops a catchment query firing on every cell selection
+   * for the many sessions that never ask about travel time.
+   *
+   * Sticky across selections on purpose. Someone comparing two sites on
+   * catchment should not have to switch it back on for the second one.
+   */
+  catchmentOn: boolean;
   /** Shared by the score controls and the map's precomputed reach overlay. */
   catchmentMode: ReachabilityMode;
   catchmentMinutes: number;
+  /**
+   * Which drawing tool has the map's clicks, or `null` for none.
+   *
+   * While this is set the canvas stops scoring clicks and collects vertices
+   * instead. It is store state rather than canvas state because the control
+   * that arms it lives in the Layers card, on the other side of the map's
+   * client-only boundary.
+   */
+  /**
+   * What the hexes are coloured by.
+   *
+   * Air quality is the sixth data layer and the only one with no geometry of
+   * its own to tile — it is a per-cell fact, so it paints on the same hexes
+   * the score does. Making it a mode rather than an overlay is what keeps the
+   * map from ever stacking two full-coverage washes.
+   *
+   * Deliberately not reset by `setPreset`: air quality does not vary by use
+   * case, so switching from warehouse to retail while reading it would snap
+   * the map back to a measure the reader did not ask for.
+   */
+  gridMeasure: GridMeasure;
+  drawMode: DrawMode | null;
+  /**
+   * The finished shape, or `null` for the whole city.
+   *
+   * Narrows the heatmap and the shortlist together, exactly as `eligibleOnly`
+   * does, because both answer "which cells am I asking about". It deliberately
+   * does *not* gate click scoring: `/v1/score` works anywhere in the coverage
+   * area, and refusing to score a point the reader just clicked would be a
+   * restriction the drawing never promised.
+   */
+  studyArea: StudyArea | null;
   toggleLayer: (id: LayerId) => void;
   setLayerOpacity: (id: LayerId, opacity: number) => void;
   setPreset: (preset: PresetName) => void;
@@ -265,8 +315,13 @@ interface MapStore {
   setRankedCells: (cells: RankedCell[] | null) => void;
   setSelectionOrigin: (origin: "map" | "list" | null) => void;
   setSelection: (selection: SelectionState | null) => void;
+  setCatchmentOn: (on: boolean) => void;
   setCatchmentMode: (mode: ReachabilityMode) => void;
   setCatchmentMinutes: (minutes: number) => void;
+  setGridMeasure: (measure: GridMeasure) => void;
+  setDrawMode: (mode: DrawMode | null) => void;
+  /** Commits a finished shape, or clears the area with `null`. */
+  setStudyArea: (area: StudyArea | null) => void;
   /** Called by the dock. Consumed and cleared by the canvas. */
   focusCell: (h3Index: string) => void;
   clearPendingFocus: () => void;
@@ -285,8 +340,12 @@ export const useMapStore = create<MapStore>((set) => ({
   selection: null,
   pendingFocusH3: null,
   selectionOrigin: null,
+  catchmentOn: false,
   catchmentMode: "car",
   catchmentMinutes: 20,
+  gridMeasure: "score",
+  drawMode: null,
+  studyArea: null,
   toggleLayer: (id) =>
     set((state) => ({
       layers: {
@@ -324,9 +383,23 @@ export const useMapStore = create<MapStore>((set) => ({
   resetWeights: () => set({ customWeights: null }),
   setRankedCells: (rankedCells) => set({ rankedCells }),
   setSelection: (selection) => set({ selection }),
+  setCatchmentOn: (catchmentOn) => set({ catchmentOn }),
   setCatchmentMode: (catchmentMode) =>
     set({ catchmentMode, catchmentMinutes: 20 }),
   setCatchmentMinutes: (catchmentMinutes) => set({ catchmentMinutes }),
+  // Does *not* clear `heatmapStats`, unlike the preset and hotspot setters.
+  // That object carries the grid analytics the score panel's waterfall and
+  // percentile grade are built from, and none of that depends on which ramp
+  // the hexes use. Dropping it would blank an open breakdown to recolor a
+  // legend. The canvas recomputes the band counts on the next render instead.
+  setGridMeasure: (gridMeasure) => set({ gridMeasure }),
+  // Arming a tool drops the previous shape rather than leaving it on screen
+  // to be replaced: two boundaries on the map, one of which is about to be
+  // discarded, cannot be told apart while the second is half drawn.
+  setDrawMode: (drawMode) => set({ drawMode, studyArea: null }),
+  // Disarms the tool in the same update that commits the shape, so the canvas
+  // cannot land a finished area and still be collecting vertices for it.
+  setStudyArea: (studyArea) => set({ studyArea, drawMode: null }),
   focusCell: (pendingFocusH3) => set({ pendingFocusH3, selectionOrigin: "list" }),
   setSelectionOrigin: (selectionOrigin) => set({ selectionOrigin }),
   clearPendingFocus: () => set({ pendingFocusH3: null }),

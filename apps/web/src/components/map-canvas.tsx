@@ -1,11 +1,13 @@
 import { H3HexagonLayer } from "@deck.gl/geo-layers";
-import { PolygonLayer } from "@deck.gl/layers";
+import { PathLayer, PolygonLayer, ScatterplotLayer } from "@deck.gl/layers";
 import { MapboxOverlay } from "@deck.gl/mapbox";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   CircleAlertIcon,
   LoaderCircleIcon,
   MapPinIcon,
+  PencilLineIcon,
+  ScanIcon,
   TriangleAlertIcon,
 } from "lucide-react";
 import { cellToLatLng } from "h3-js";
@@ -23,12 +25,17 @@ import {
   type PresetName,
   type Weights,
 } from "@/lib/cells";
-import { buildCatchmentCells, catchmentFill, type CatchmentCell } from "@/lib/catchment";
+import {
+  CATCHMENT_LINE_COLOR,
+  CATCHMENT_LINE_WIDTH,
+  buildCatchmentRegions,
+  type CatchmentRegion,
+} from "@/lib/catchment";
 import {
   HEX_SEAM_RGBA,
-  SCORE_BINS,
-  binIndexForScore,
-  colorForScore,
+  binIndexIn,
+  colorIn,
+  measureMeta,
 } from "@/lib/heatmap-palette";
 import {
   COLD_FILL,
@@ -44,6 +51,28 @@ import {
   type UnderservedCell,
 } from "@/lib/hotspots";
 import { computeGridAnalytics } from "@/lib/score-analytics";
+import {
+  RING_COLOR,
+  RING_WIDTH,
+  expandedHexRing,
+  pulseFrame,
+} from "@/lib/selection-pulse";
+import {
+  DOUBLE_CLICK_SLOP_PX,
+  MIN_RADIUS_M,
+  STUDY_AREA_DRAFT_LINE,
+  STUDY_AREA_COLOR,
+  STUDY_AREA_FILL,
+  STUDY_AREA_LINE,
+  cellsInStudyArea,
+  circleRing,
+  describeStudyArea,
+  distanceMeters,
+  pixelsApart,
+  studyAreaRing,
+  withoutTrailingDuplicate,
+  type Position,
+} from "@/lib/study-area";
 import { useDebouncedValue } from "@/lib/use-debounced-value";
 import {
   POI_COLORS,
@@ -217,6 +246,8 @@ export default function MapCanvas() {
   const preset = useMapStore((s) => s.preset);
   const mapLayers = useMapStore((s) => s.layers);
   const heatmap = mapLayers.heatmap;
+  const gridMeasure = useMapStore((s) => s.gridMeasure);
+  const measure = measureMeta(gridMeasure);
   const eligibleOnly = useMapStore((s) => s.eligibleOnly);
   const setHeatmapStats = useMapStore((s) => s.setHeatmapStats);
   const setPresets = useMapStore((s) => s.setPresets);
@@ -226,6 +257,23 @@ export default function MapCanvas() {
   const setHotspotStats = useMapStore((s) => s.setHotspotStats);
   const setHotspotStatus = useMapStore((s) => s.setHotspotStatus);
   const analysisOn = mapLayers.hotspots.visible || mapLayers.underserved.visible;
+
+  const drawMode = useMapStore((s) => s.drawMode);
+  const studyArea = useMapStore((s) => s.studyArea);
+  const setDrawMode = useMapStore((s) => s.setDrawMode);
+  const setStudyArea = useMapStore((s) => s.setStudyArea);
+
+  /**
+   * The shape being drawn right now: corners placed so far, and where the
+   * pointer is.
+   *
+   * Local rather than in the store. It changes at pointer-move rate and
+   * nothing outside this canvas draws it, so putting it in the store would
+   * publish a hundred updates a second to subscribers that only ever want the
+   * finished shape.
+   */
+  const [draft, setDraft] = useState<Position[]>([]);
+  const [cursor, setCursor] = useState<Position | null>(null);
 
   const setRankedCells = useMapStore((s) => s.setRankedCells);
   const setSelection = useMapStore((s) => s.setSelection);
@@ -263,6 +311,22 @@ export default function MapCanvas() {
   // so the map and the panel can never disagree about what weights are active.
   const weights = customWeights ?? presetWeights ?? ({} as Weights);
   const weightsReady = Object.keys(weights).length > 0;
+
+  /**
+   * What one cell is worth under the active measure.
+   *
+   * The composite is weighted here in the browser, so it moves with the
+   * sliders; air quality is a raw subscore off the same payload and does not.
+   * One function, so the fill, the tooltip headline and the legend's band
+   * counts cannot disagree about what the colors are showing.
+   */
+  const valueOf = useMemo(
+    () =>
+      gridMeasure === "aqi"
+        ? (cell: HeatmapCell) => cell.subscores.aqi
+        : (cell: HeatmapCell) => compositeScore(cell.subscores, weights),
+    [gridMeasure, weights],
+  );
 
   // Gi* and DBSCAN run server-side across the whole grid, so unlike the
   // heatmap they cannot be recomputed in the browser when a weight moves.
@@ -325,9 +389,26 @@ export default function MapCanvas() {
     if (Object.keys(served).length > 0) setPresets(served);
   }, [presetsQuery.data, setPresets]);
 
+  /**
+   * The cells the reader is actually asking about.
+   *
+   * Two narrowings, applied together: the drawn study area and the
+   * eligibility filter. Both cut the same array, which is what keeps the map
+   * and the shortlist from ever disagreeing — `rankedCells` is built from
+   * this, so drawing a boundary reorders the shortlist in the same frame the
+   * heatmap shrinks to it, with no request.
+   *
+   * The analysis overlays are deliberately *not* cut this way. Gi* and DBSCAN
+   * run across the whole grid, so clipping a cluster to a hand-drawn boundary
+   * would redraw a finding as something smaller than what was found.
+   */
+  const areaCells = useMemo(
+    () => cellsInStudyArea(cells, studyArea),
+    [cells, studyArea],
+  );
   const visibleCells = useMemo(
-    () => (eligibleOnly ? cells.filter((cell) => cell.eligible) : cells),
-    [cells, eligibleOnly],
+    () => (eligibleOnly ? areaCells.filter((cell) => cell.eligible) : areaCells),
+    [areaCells, eligibleOnly],
   );
 
   /**
@@ -375,6 +456,7 @@ export default function MapCanvas() {
     };
   }, [scorePoint.data, weights]);
   const selectedH3 = selectedData?.h3_index ?? null;
+  const catchmentOn = useMapStore((state) => state.catchmentOn);
   const catchmentMode = useMapStore((state) => state.catchmentMode);
   const catchmentMinutes = useMapStore((state) => state.catchmentMinutes);
   const catchmentQuery = useQuery({
@@ -382,13 +464,61 @@ export default function MapCanvas() {
       h3Index: selectedH3 ?? "",
       mode: catchmentMode,
     }),
-    enabled: selectedH3 !== null,
+    enabled: catchmentOn && selectedH3 !== null,
     staleTime: Infinity,
   });
 
-  const catchmentCells = useMemo(
-    () => buildCatchmentCells(catchmentQuery.data?.bands ?? [], catchmentMinutes),
-    [catchmentQuery.data, catchmentMinutes],
+  /**
+   * Milliseconds since the locator beacon started, or `null` when it is not
+   * running.
+   *
+   * Driven by `requestAnimationFrame` rather than a CSS animation, because the
+   * thing being animated is a deck.gl layer and there is no DOM node to style.
+   */
+  const [pulse, setPulse] = useState<number | null>(null);
+
+  /**
+   * The beacon runs for exactly as long as Reach is on and a cell is scored.
+   *
+   * Those two conditions are the situation it exists for: a white contour
+   * spreading across the city with the white selection ring somewhere inside
+   * it. With Reach off there is nothing to lose the cell in, so it stops and
+   * the plain ring is left to do the marking.
+   */
+  useEffect(() => {
+    if (!selectedH3 || !catchmentOn) {
+      setPulse(null);
+      return;
+    }
+    // Honoured the same way the shortlist's `flyTo` honours it: the beacon is
+    // an attention cue, and for a reader who has asked for less motion the
+    // steady ring already marks the cell.
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setPulse(null);
+      return;
+    }
+
+    const start = performance.now();
+    let frame = requestAnimationFrame(function step(now) {
+      setPulse(now - start);
+      frame = requestAnimationFrame(step);
+    });
+
+    return () => cancelAnimationFrame(frame);
+  }, [selectedH3, catchmentOn]);
+
+  const pulseState = pulse == null ? null : pulseFrame(pulse);
+
+  const catchmentRegions = useMemo(
+    // Gated on the switch as well as on the query, because disabling a query
+    // does not discard what it already cached: switching Reach off after a
+    // fetch would leave `data` populated and the contours drawn.
+    () =>
+      buildCatchmentRegions(
+        catchmentOn ? (catchmentQuery.data?.bands ?? []) : [],
+        catchmentMinutes,
+      ),
+    [catchmentOn, catchmentQuery.data, catchmentMinutes],
   );
 
   // Subscores and hard constraints vary by preset, so refresh the selected
@@ -428,6 +558,10 @@ export default function MapCanvas() {
   // preset's weights through a ref rather than capturing a stale value.
   const weightsRef = useRef<Weights>(weights);
   weightsRef.current = weights;
+  // Same reason as the weights: the tooltip closure is built once with the
+  // overlay, so it cannot capture the measure by value.
+  const measureRef = useRef(measure);
+  measureRef.current = measure;
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -482,6 +616,10 @@ export default function MapCanvas() {
       target.on("mousemove", POI_HOVER_LAYER_ID, (event) => {
         const feature = event.features?.[0];
         if (!feature || feature.geometry.type !== "Point") return;
+        // While a tool is armed the cursor is placing corners, not inspecting
+        // premises. The card would otherwise open over the shape being drawn
+        // and swap the crosshair for a pointer mid-stroke.
+        if (useMapStore.getState().drawMode) return;
 
         poiHoveredRef.current = true;
         target.getCanvas().style.cursor = "pointer";
@@ -566,8 +704,17 @@ export default function MapCanvas() {
     });
 
     map.on("click", ({ lngLat }) => {
-      const { preset: activePreset, customWeights: edits } =
-        useMapStore.getState();
+      const {
+        preset: activePreset,
+        customWeights: edits,
+        drawMode: armed,
+      } = useMapStore.getState();
+      // A drawing tool owns the clicks while it is armed. Without this, every
+      // corner placed would also score the point under it, so finishing a
+      // five-corner shape would fire five score requests and leave the panel
+      // showing whichever one landed last.
+      if (armed) return;
+
       const point = { lat: lngLat.lat, lon: lngLat.lng };
       useMapStore.getState().setSelectionOrigin("map");
       selectedPointRef.current = point;
@@ -623,7 +770,14 @@ export default function MapCanvas() {
         }
 
         const cell = object as HeatmapCell;
-        const score = compositeScore(cell.subscores, weightsRef.current);
+        const activeMeasure = measureRef.current;
+        // The headline has to be the number the color is showing. Leaving the
+        // composite up while the hexes are painted by air quality would put a
+        // score of 38 on top of a bright cell and read as a rendering bug.
+        const headline =
+          activeMeasure.id === "aqi"
+            ? cell.subscores.aqi
+            : compositeScore(cell.subscores, weightsRef.current);
         const rows = SUBSCORE_KEYS.map(
           (key) =>
             `<div style="display:flex;justify-content:space-between;gap:12px">
@@ -637,7 +791,15 @@ export default function MapCanvas() {
             <div style="min-width:190px">
               <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:6px">
                 <span style="font-size:18px;font-weight:600;font-family:var(--font-mono);font-variant-numeric:tabular-nums">
-                  ${score == null ? "-" : score.toFixed(1)}
+                  ${headline == null ? "-" : headline.toFixed(1)}
+                  ${
+                    // Named only when it is not the score. The score is what
+                    // the product is about, so labelling it would caption the
+                    // obvious on every hover.
+                    activeMeasure.id === "score"
+                      ? ""
+                      : `<span style="margin-left:6px;font-size:11px;font-weight:400;font-family:var(--font-sans);color:var(--muted-foreground)">${activeMeasure.label}</span>`
+                  }
                 </span>
                 <span style="font-size:11px;color:${
                   cell.eligible ? "var(--success)" : "var(--destructive)"
@@ -667,7 +829,142 @@ export default function MapCanvas() {
     };
   }, []);
 
-  const layers = useMemo(() => {
+  /**
+   * The drawing tools.
+   *
+   * Attached in their own effect keyed on the armed tool, rather than folded
+   * into the map's mount effect, so each handler closes over the tool that is
+   * actually running and the whole interaction tears itself down when the tool
+   * is put away. `deckAnchor` is in the dependencies only as a readiness
+   * signal: it is published by the `load` handler, which is the point the map
+   * exists to attach to.
+   *
+   * Corners live in a closure variable as well as in React state. The state is
+   * what draws; the closure is what the next click reads, because a handler
+   * registered once per tool would otherwise keep seeing an empty array.
+   */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !drawMode || !deckAnchor) return;
+
+    let corners: Position[] = [];
+    setDraft([]);
+    setCursor(null);
+
+    const publish = (next: Position[]) => {
+      corners = next;
+      setDraft(next);
+    };
+
+    // Finishing a shape is a double-click, so the basemap's own double-click
+    // zoom has to stand down for the duration or the last corner also zooms.
+    map.doubleClickZoom.disable();
+
+    /** Where a ground position falls on screen right now. */
+    const project = (position: Position) => map.project(position);
+
+    const onClick = (event: maplibregl.MapMouseEvent) => {
+      const point: Position = [event.lngLat.lng, event.lngLat.lat];
+
+      if (drawMode === "radius") {
+        // First click is the centre, second sets how far out to look.
+        if (corners.length === 0) {
+          publish([point]);
+          return;
+        }
+        // Two guards, because they catch different mistakes. The pixel one
+        // rejects a double-click on the centre, which at low zoom would
+        // otherwise commit a circle several hundred metres wide that the
+        // reader never drew. The metric one rejects a circle small enough to
+        // contain no cell at all.
+        const radiusMeters = distanceMeters(corners[0], point);
+        const drift = pixelsApart(project(corners[0]), event.point);
+        if (drift < DOUBLE_CLICK_SLOP_PX || radiusMeters < MIN_RADIUS_M) return;
+
+        setStudyArea({ kind: "radius", center: corners[0], radiusMeters });
+        return;
+      }
+
+      publish([...corners, point]);
+    };
+
+    const onMouseMove = (event: maplibregl.MapMouseEvent) => {
+      setCursor([event.lngLat.lng, event.lngLat.lat]);
+    };
+
+    const finishPolygon = () => {
+      const ring = withoutTrailingDuplicate(corners, project);
+      if (ring.length < 3) return;
+      setStudyArea({ kind: "polygon", ring });
+    };
+
+    const onDoubleClick = () => {
+      if (drawMode === "polygon") finishPolygon();
+    };
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setDrawMode(null);
+        return;
+      }
+      if (event.key === "Enter" && drawMode === "polygon") {
+        event.preventDefault();
+        finishPolygon();
+        return;
+      }
+      // Undo one corner. Cheap to add and the alternative is starting the
+      // whole shape again over a single misplaced click.
+      if (event.key === "Backspace" && corners.length > 0) {
+        event.preventDefault();
+        publish(corners.slice(0, -1));
+      }
+    };
+
+    map.on("click", onClick);
+    map.on("mousemove", onMouseMove);
+    map.on("dblclick", onDoubleClick);
+    document.addEventListener("keydown", onKeyDown);
+
+    return () => {
+      map.off("click", onClick);
+      map.off("mousemove", onMouseMove);
+      map.off("dblclick", onDoubleClick);
+      document.removeEventListener("keydown", onKeyDown);
+      map.doubleClickZoom.enable();
+      setDraft([]);
+      setCursor(null);
+    };
+  }, [drawMode, deckAnchor, setStudyArea, setDrawMode]);
+
+  /**
+   * The half-drawn shape, rebuilt as the pointer moves.
+   *
+   * A polygon shows the corners placed so far plus a rubber band to the
+   * cursor; a radius shows the circle the second click would commit. Both are
+   * dimmer than a committed boundary, so "not yet" is legible without a label.
+   */
+  const draftPreview = useMemo(() => {
+    if (!drawMode || draft.length === 0) return null;
+
+    if (drawMode === "radius") {
+      const center = draft[0];
+      const radiusMeters = cursor ? distanceMeters(center, cursor) : 0;
+      return {
+        kind: "radius" as const,
+        center,
+        radiusMeters,
+        ring: radiusMeters >= MIN_RADIUS_M ? circleRing(center, radiusMeters) : null,
+      };
+    }
+
+    return {
+      kind: "polygon" as const,
+      corners: draft,
+      path: cursor ? [...draft, cursor] : draft,
+    };
+  }, [drawMode, draft, cursor]);
+
+  const baseLayers = useMemo(() => {
     // Interleaved layers are inserted with `map.addLayer(group, beforeId)`, so
     // handing deck a `beforeId` before the style has that layer would throw.
     // Nothing renders until the `load` handler has published the anchor.
@@ -691,8 +988,7 @@ export default function MapCanvas() {
               id: "score-heatmap",
               data: visibleCells,
               getHexagon: (d) => d.h3Index,
-              getFillColor: (d) =>
-                colorForScore(compositeScore(d.subscores, weights)),
+              getFillColor: (d) => colorIn(valueOf(d), measure.bins),
               // Soft seams preserve the H3 cell boundaries without turning
               // the heatmap into a hard black honeycomb.
               stroked: true,
@@ -705,24 +1001,29 @@ export default function MapCanvas() {
               autoHighlight: true,
               highlightColor: [255, 255, 255, 40],
               updateTriggers: {
-                getFillColor: [weights],
+                getFillColor: [valueOf, measure],
               },
             }),
           ]
         : []),
-      ...(catchmentCells.length > 0
+      // Contours, not a wash. Filling the reachable cells covered the score
+      // colours underneath with a second choropleth, which hid the answer the
+      // reader was in the middle of reading. The boundary says the same thing
+      // and recolours nothing, so this draws over the hexes without competing
+      // with them.
+      ...(catchmentRegions.length > 0
         ? [
-            new H3HexagonLayer<CatchmentCell>({
+            new PolygonLayer<CatchmentRegion>({
               ...analysisPlacement,
               id: "catchment-bands",
-              data: catchmentCells,
-              getHexagon: (cell) => cell.h3Index,
-              getFillColor: (cell) => catchmentFill(cell.minutes),
-              filled: true,
+              data: catchmentRegions,
+              getPolygon: (region) => region.rings,
+              filled: false,
               stroked: true,
-              getLineColor: [255, 105, 110, 80],
-              lineWidthMinPixels: 0.5,
-              extruded: false,
+              getLineColor: CATCHMENT_LINE_COLOR,
+              getLineWidth: CATCHMENT_LINE_WIDTH,
+              lineWidthUnits: "pixels",
+              lineWidthMinPixels: 1.5,
               opacity: 1,
               pickable: false,
             }),
@@ -742,8 +1043,12 @@ export default function MapCanvas() {
               getHexagon: (d) => d.h3Index,
               filled: false,
               stroked: true,
-              getLineColor: [255, 255, 255, 255],
-              lineWidthMinPixels: 3,
+              getLineColor: RING_COLOR,
+              // Constant. The beacon above supplies all the movement, and a
+              // ring that also throbbed would add motion without adding
+              // information — while dragging this layer, and the thousand-cell
+              // ones beside it, into the per-frame path for nothing.
+              lineWidthMinPixels: RING_WIDTH,
               extruded: false,
               pickable: false,
               // Independent of the heatmap's opacity slider: dialling the fill
@@ -801,16 +1106,111 @@ export default function MapCanvas() {
             }),
           ]
         : []),
+
+      // Last in the stack, so the reader's own boundary is never buried under
+      // a finding or a catchment band. It is the one thing on the map that is
+      // theirs rather than the data's, and losing track of where it runs is
+      // what makes a drawn area feel unreliable.
+      ...(studyArea
+        ? [
+            new PolygonLayer<{ ring: Position[] }>({
+              ...analysisPlacement,
+              id: "study-area",
+              data: [{ ring: studyAreaRing(studyArea) }],
+              getPolygon: (d) => d.ring,
+              filled: true,
+              getFillColor: STUDY_AREA_FILL,
+              stroked: true,
+              getLineColor: STUDY_AREA_LINE,
+              getLineWidth: 2,
+              lineWidthUnits: "pixels",
+              lineWidthMinPixels: 2,
+              opacity: 1,
+              // Clicking inside the area still scores the cell under the
+              // pointer, so the boundary stays out of picking entirely.
+              pickable: false,
+            }),
+          ]
+        : []),
+
+      ...(draftPreview?.kind === "polygon"
+        ? [
+            new PathLayer<{ path: Position[] }>({
+              ...analysisPlacement,
+              id: "study-area-draft-path",
+              data: [{ path: draftPreview.path }],
+              getPath: (d) => d.path,
+              getColor: STUDY_AREA_DRAFT_LINE,
+              getWidth: 2,
+              widthUnits: "pixels",
+              widthMinPixels: 2,
+              pickable: false,
+            }),
+            // The corners themselves. Without them a single placed click
+            // draws nothing at all until the pointer moves, so the first
+            // click of every shape looks like it missed.
+            new ScatterplotLayer<Position>({
+              ...analysisPlacement,
+              id: "study-area-draft-corners",
+              data: draftPreview.corners,
+              getPosition: (d) => d,
+              getFillColor: STUDY_AREA_LINE,
+              getRadius: 4,
+              radiusUnits: "pixels",
+              radiusMinPixels: 4,
+              pickable: false,
+            }),
+          ]
+        : []),
+
+      ...(draftPreview?.kind === "radius" && draftPreview.ring
+        ? [
+            new PolygonLayer<{ ring: Position[] }>({
+              ...analysisPlacement,
+              id: "study-area-draft-radius",
+              data: [{ ring: draftPreview.ring }],
+              getPolygon: (d) => d.ring,
+              filled: true,
+              getFillColor: STUDY_AREA_FILL,
+              stroked: true,
+              getLineColor: STUDY_AREA_DRAFT_LINE,
+              getLineWidth: 2,
+              lineWidthUnits: "pixels",
+              lineWidthMinPixels: 2,
+              opacity: 1,
+              pickable: false,
+            }),
+          ]
+        : []),
+
+      ...(draftPreview?.kind === "radius"
+        ? [
+            new ScatterplotLayer<Position>({
+              ...analysisPlacement,
+              id: "study-area-draft-centre",
+              data: [draftPreview.center],
+              getPosition: (d) => d,
+              getFillColor: STUDY_AREA_LINE,
+              getRadius: 4,
+              radiusUnits: "pixels",
+              radiusMinPixels: 4,
+              pickable: false,
+            }),
+          ]
+        : []),
     ];
   }, [
     deckAnchor,
+    studyArea,
+    draftPreview,
     heatmap.visible,
     heatmap.opacity,
     visibleCells,
-    weights,
+    valueOf,
+    measure,
     weightsReady,
     selectedH3,
-    catchmentCells,
+    catchmentRegions,
     mapLayers.underserved.visible,
     mapLayers.underserved.opacity,
     mapLayers.hotspots.visible,
@@ -818,6 +1218,46 @@ export default function MapCanvas() {
     underservedCells,
     regions,
   ]);
+
+  /**
+   * The beacon, built on its own.
+   *
+   * Kept out of `baseLayers` deliberately. While Reach is on this is rebuilt
+   * sixty times a second and forever, and folding it into the memo above would
+   * drag every other layer — including two carrying a thousand cells each —
+   * through a fresh construction and prop diff on every one of those frames.
+   * Split out, a frame costs one six-vertex polygon and an array copy.
+   */
+  const pulseLayer = useMemo(() => {
+    if (!deckAnchor || !selectedH3 || !pulseState || pulseState.alpha <= 0) return null;
+
+    // Spread, not written inline — `beforeId` is read by `@deck.gl/mapbox` in
+    // interleaved mode but is not part of deck's own layer props, so inline it
+    // is rejected as an excess property. Same reason as `baseLayers`.
+    const placement = { beforeId: deckAnchor.analysisBeforeId };
+
+    return new PolygonLayer<{ ring: [number, number][] }>({
+      ...placement,
+      id: "selected-cell-pulse",
+      data: [{ ring: expandedHexRing(selectedH3, pulseState.scale) }],
+      getPolygon: (d) => d.ring,
+      filled: false,
+      stroked: true,
+      getLineColor: [255, 255, 255, pulseState.alpha],
+      getLineWidth: 2,
+      lineWidthUnits: "pixels",
+      lineWidthMinPixels: 2,
+      opacity: 1,
+      pickable: false,
+    });
+  }, [deckAnchor, selectedH3, pulseState]);
+
+  // Appended last, so the beacon is never buried by an overlay. Its whole job
+  // is to be seen; anything drawing over it would defeat the point.
+  const layers = useMemo(
+    () => (pulseLayer ? [...baseLayers, pulseLayer] : baseLayers),
+    [baseLayers, pulseLayer],
+  );
 
   useEffect(() => {
     overlayRef.current?.setProps({ layers });
@@ -875,10 +1315,10 @@ export default function MapCanvas() {
       return;
     }
 
-    const counts = new Array<number>(SCORE_BINS.length).fill(0);
+    const counts = new Array<number>(measure.bins.length).fill(0);
     let eligible = 0;
     for (const cell of cellsQuery.data.cells) {
-      const index = binIndexForScore(compositeScore(cell.subscores, weights));
+      const index = binIndexIn(valueOf(cell), measure.bins);
       if (index >= 0) counts[index] += 1;
       if (cell.eligible) eligible += 1;
     }
@@ -891,7 +1331,7 @@ export default function MapCanvas() {
       h3Resolution: cellsQuery.data.h3Resolution,
       analytics: computeGridAnalytics(cellsQuery.data.cells, weights),
     });
-  }, [cellsQuery.data, weights, weightsReady, setHeatmapStats]);
+  }, [cellsQuery.data, weights, weightsReady, valueOf, measure, setHeatmapStats]);
 
   const loading = cellsQuery.isPending || presetsQuery.isPending;
   const failed = cellsQuery.error ?? presetsQuery.error;
@@ -910,6 +1350,57 @@ export default function MapCanvas() {
           A column so the grid notice and the POI hint stack instead of
           landing on top of each other when both apply. */}
       <div className="pointer-events-none absolute inset-x-0 bottom-8 flex flex-col items-center gap-1.5">
+        {/* A drawing tool takes over the map's clicks, which is a big enough
+            change to the app's main interaction that it has to say so. The
+            keys are named because none of them is guessable: nothing else in
+            the product finishes on a double-click. */}
+        {drawMode ? (
+          <p className={`${panelPill} text-muted-foreground`}>
+            {drawMode === "polygon" ? (
+              <>
+                <PencilLineIcon className="size-3.5 shrink-0" />
+                Click each corner of the area. Double-click or press Enter to finish,
+                Backspace to undo a corner, Escape to cancel
+              </>
+            ) : (
+              <>
+                <ScanIcon className="size-3.5 shrink-0" />
+                Click the centre of the area, then click again to set how far out
+                to look. Escape to cancel
+              </>
+            )}
+          </p>
+        ) : studyArea ? (
+          /* The only way out of a study area if the Layers card is closed.
+             The card still owns the tools; this owns the undo, because the
+             thing being undone is on the map rather than in the card. */
+          <p className={`pointer-events-auto ${panelPill} text-muted-foreground`}>
+            <ScanIcon className="size-3.5 shrink-0" style={{ color: STUDY_AREA_COLOR }} />
+            {/* The count is dropped while the grid is in flight rather than
+                rendered as "0 of 0", which reads as an area that found
+                nothing when in fact nothing has arrived to find yet. */}
+            <span>
+              Focused on {describeStudyArea(studyArea)}
+              {cells.length > 0 ? (
+                <>
+                  {" — "}
+                  <span className="font-mono tabular-nums text-foreground">
+                    {areaCells.length}
+                  </span>{" "}
+                  of {cells.length} sites
+                </>
+              ) : null}
+            </span>
+            <button
+              type="button"
+              onClick={() => setStudyArea(null)}
+              className="-mr-1 ml-1 rounded-full px-1.5 py-px text-foreground underline underline-offset-2 transition-colors hover:text-primary focus-visible:ring-1 focus-visible:ring-ring/50 focus-visible:outline-none"
+            >
+              Show all Austin
+            </button>
+          </p>
+        ) : null}
+
         {heatmap.visible ? (
           loading ? (
             <p className={`${panelPill} text-muted-foreground`}>
@@ -922,11 +1413,18 @@ export default function MapCanvas() {
               Could not load scores. {failed.message}
             </p>
           ) : visibleCells.length === 0 ? (
+            /* Which of the two narrowings emptied the map decides the wording.
+               Saying "nothing scored here yet" over a study area the reader
+               just drew blames the data for their own boundary. */
             <p className={`${panelPill} text-muted-foreground`}>
               <CircleAlertIcon className="size-3.5 shrink-0" />
-              {eligibleOnly
-                ? "Nowhere clears every rule for this use case"
-                : "Nothing scored here yet"}
+              {studyArea && areaCells.length === 0
+                ? "Your area does not reach any scored sites. Try a wider one"
+                : eligibleOnly
+                  ? studyArea
+                    ? "Nothing in your area clears every rule for this use case"
+                    : "Nowhere clears every rule for this use case"
+                  : "Nothing scored here yet"}
             </p>
           ) : null
         ) : null}
