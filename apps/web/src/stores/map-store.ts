@@ -172,6 +172,8 @@ export interface SelectionState {
   cell: ScoredCell | null;
 }
 
+export type ReachabilityMode = "car" | "foot";
+
 interface MapStore {
   layers: Record<LayerId, LayerState>;
   preset: PresetName;
@@ -245,6 +247,9 @@ interface MapStore {
    * first row would make the second row cost two clicks.
    */
   selectionOrigin: "map" | "list" | null;
+  /** Shared by the score controls and the map's precomputed reach overlay. */
+  catchmentMode: ReachabilityMode;
+  catchmentMinutes: number;
   toggleLayer: (id: LayerId) => void;
   setLayerOpacity: (id: LayerId, opacity: number) => void;
   setPreset: (preset: PresetName) => void;
@@ -260,6 +265,8 @@ interface MapStore {
   setRankedCells: (cells: RankedCell[] | null) => void;
   setSelectionOrigin: (origin: "map" | "list" | null) => void;
   setSelection: (selection: SelectionState | null) => void;
+  setCatchmentMode: (mode: ReachabilityMode) => void;
+  setCatchmentMinutes: (minutes: number) => void;
   /** Called by the dock. Consumed and cleared by the canvas. */
   focusCell: (h3Index: string) => void;
   clearPendingFocus: () => void;
@@ -278,6 +285,8 @@ export const useMapStore = create<MapStore>((set) => ({
   selection: null,
   pendingFocusH3: null,
   selectionOrigin: null,
+  catchmentMode: "car",
+  catchmentMinutes: 20,
   toggleLayer: (id) =>
     set((state) => ({
       layers: {
@@ -315,6 +324,9 @@ export const useMapStore = create<MapStore>((set) => ({
   resetWeights: () => set({ customWeights: null }),
   setRankedCells: (rankedCells) => set({ rankedCells }),
   setSelection: (selection) => set({ selection }),
+  setCatchmentMode: (catchmentMode) =>
+    set({ catchmentMode, catchmentMinutes: 20 }),
+  setCatchmentMinutes: (catchmentMinutes) => set({ catchmentMinutes }),
   focusCell: (pendingFocusH3) => set({ pendingFocusH3, selectionOrigin: "list" }),
   setSelectionOrigin: (selectionOrigin) => set({ selectionOrigin }),
   clearPendingFocus: () => set({ pendingFocusH3: null }),

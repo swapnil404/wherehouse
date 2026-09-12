@@ -1,9 +1,12 @@
 import {
+  CarFrontIcon,
   CheckIcon,
+  FootprintsIcon,
   LoaderCircleIcon,
   TriangleAlertIcon,
   XIcon,
 } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 
 import score0 from "@/assets/score-font/0.png";
 import score1 from "@/assets/score-font/1.png";
@@ -16,6 +19,7 @@ import score7 from "@/assets/score-font/7.png";
 import score8 from "@/assets/score-font/8.png";
 import score9 from "@/assets/score-font/9.png";
 import scoreDot from "@/assets/score-font/dot.png";
+import { catchmentCssColor } from "@/lib/catchment";
 import {
   SUBSCORE_LABELS,
   type SubscoreKey,
@@ -28,6 +32,8 @@ import {
   percentileOf,
   type GridAnalytics,
 } from "@/lib/score-analytics";
+import { useMapStore, type ReachabilityMode } from "@/stores/map-store";
+import { useTRPC } from "@/utils/trpc";
 
 import { text } from "./panel-styles";
 import SectionLabel from "./section-label";
@@ -130,6 +136,102 @@ function formatConstraintValue(value: unknown): string {
   if (typeof value === "boolean") return value ? "yes" : "no";
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);
+}
+
+function CatchmentSection({ h3Index }: { h3Index: string }) {
+  const trpc = useTRPC();
+  const mode = useMapStore((state) => state.catchmentMode);
+  const minutes = useMapStore((state) => state.catchmentMinutes);
+  const setMode = useMapStore((state) => state.setCatchmentMode);
+  const setMinutes = useMapStore((state) => state.setCatchmentMinutes);
+
+  const catchment = useQuery({
+    ...trpc.geo.catchment.queryOptions({ h3Index, mode }),
+    staleTime: Infinity,
+  });
+
+  const fallbackMinutes = mode === "car" ? [10, 20, 30] : [10, 20];
+  const availableMinutes = catchment.data?.bands.map((band) => band.minutes) ?? fallbackMinutes;
+  const selectedBand = catchment.data?.bands.find((band) => band.minutes === minutes);
+
+  return (
+    <div className="mt-4 border-t border-border pt-3">
+      <div className="flex items-center justify-between gap-3">
+        <SectionLabel as="p">Reach</SectionLabel>
+        <div className="flex rounded-md bg-white/5 p-0.5">
+          {(["car", "foot"] as const).map((option) => {
+            const Icon = option === "car" ? CarFrontIcon : FootprintsIcon;
+            const active = mode === option;
+            return (
+              <button
+                aria-pressed={active}
+                className={`flex items-center gap-1 rounded-sm px-2 py-1 text-[10px] transition-colors ${
+                  active
+                    ? "bg-foreground text-background"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+                key={option}
+                onClick={() => setMode(option as ReachabilityMode)}
+                type="button"
+              >
+                <Icon className="size-3" aria-hidden="true" />
+                {option === "car" ? "Drive" : "Walk"}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className={`mt-2 grid gap-1 ${mode === "car" ? "grid-cols-3" : "grid-cols-2"}`}>
+        {availableMinutes.map((bandMinutes) => (
+          <button
+            aria-pressed={minutes === bandMinutes}
+            className={`rounded-md py-1.5 text-[11px] font-medium tabular-nums transition-colors ${
+              minutes === bandMinutes
+                ? "bg-white/10 text-foreground ring-1 ring-white/25"
+                : "bg-white/5 text-muted-foreground hover:bg-white/10 hover:text-foreground"
+            }`}
+            key={bandMinutes}
+            onClick={() => setMinutes(bandMinutes)}
+            type="button"
+          >
+            <span
+              aria-hidden="true"
+              className="mr-1 inline-block size-1.5 rounded-[1px]"
+              style={{ backgroundColor: catchmentCssColor(bandMinutes) }}
+            />
+            {bandMinutes} min
+          </button>
+        ))}
+      </div>
+
+      {catchment.isPending ? (
+        <p className={`mt-2 flex items-center gap-1.5 ${text.hint}`}>
+          <LoaderCircleIcon className="size-3 animate-spin" aria-hidden="true" />
+          Loading reachability…
+        </p>
+      ) : catchment.error ? (
+        <p className="mt-2 text-[11px] text-destructive">
+          Catchment unavailable. {catchment.error.message}
+        </p>
+      ) : selectedBand ? (
+        <div className="mt-2 grid grid-cols-2 gap-px overflow-hidden rounded-md bg-border">
+          <div className="bg-black/80 px-2.5 py-2">
+            <span className="block text-[9px] text-muted-foreground">People reachable</span>
+            <span className="mt-0.5 block font-mono text-sm font-medium tabular-nums">
+              {selectedBand.catchmentPopulation.toLocaleString()}
+            </span>
+          </div>
+          <div className="bg-black/80 px-2.5 py-2">
+            <span className="block text-[9px] text-muted-foreground">H3 cells</span>
+            <span className="mt-0.5 block font-mono text-sm font-medium tabular-nums">
+              {selectedBand.destinationCount.toLocaleString()}
+            </span>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 export default function ScorePanel({
@@ -259,6 +361,8 @@ export default function ScorePanel({
               </div>
             </div>
           ) : null}
+
+          <CatchmentSection h3Index={data.h3_index} />
 
           <div className="mt-4">
             <SectionLabel as="p">Hard rules</SectionLabel>

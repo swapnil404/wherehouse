@@ -23,6 +23,7 @@ import {
   type PresetName,
   type Weights,
 } from "@/lib/cells";
+import { buildCatchmentCells, catchmentFill, type CatchmentCell } from "@/lib/catchment";
 import {
   HEX_SEAM_RGBA,
   SCORE_BINS,
@@ -374,6 +375,21 @@ export default function MapCanvas() {
     };
   }, [scorePoint.data, weights]);
   const selectedH3 = selectedData?.h3_index ?? null;
+  const catchmentMode = useMapStore((state) => state.catchmentMode);
+  const catchmentMinutes = useMapStore((state) => state.catchmentMinutes);
+  const catchmentQuery = useQuery({
+    ...trpc.geo.catchment.queryOptions({
+      h3Index: selectedH3 ?? "",
+      mode: catchmentMode,
+    }),
+    enabled: selectedH3 !== null,
+    staleTime: Infinity,
+  });
+
+  const catchmentCells = useMemo(
+    () => buildCatchmentCells(catchmentQuery.data?.bands ?? [], catchmentMinutes),
+    [catchmentQuery.data, catchmentMinutes],
+  );
 
   // Subscores and hard constraints vary by preset, so refresh the selected
   // cell when the use case changes. Weight-only edits stay local: the selected
@@ -694,6 +710,24 @@ export default function MapCanvas() {
             }),
           ]
         : []),
+      ...(catchmentCells.length > 0
+        ? [
+            new H3HexagonLayer<CatchmentCell>({
+              ...analysisPlacement,
+              id: "catchment-bands",
+              data: catchmentCells,
+              getHexagon: (cell) => cell.h3Index,
+              getFillColor: (cell) => catchmentFill(cell.minutes),
+              filled: true,
+              stroked: true,
+              getLineColor: [255, 105, 110, 80],
+              lineWidthMinPixels: 0.5,
+              extruded: false,
+              opacity: 1,
+              pickable: false,
+            }),
+          ]
+        : []),
       // Outline the scored cell — the only selection cue, so it carries the
       // weight a pin used to. A pin marked a coordinate, which was misleading:
       // scoring snaps to the containing cell, so the hexagon is the honest
@@ -702,7 +736,7 @@ export default function MapCanvas() {
       ...(selectedH3
         ? [
             new H3HexagonLayer<{ h3Index: string }>({
-              ...placement,
+              ...analysisPlacement,
               id: "selected-cell",
               data: [{ h3Index: selectedH3 }],
               getHexagon: (d) => d.h3Index,
@@ -776,6 +810,7 @@ export default function MapCanvas() {
     weights,
     weightsReady,
     selectedH3,
+    catchmentCells,
     mapLayers.underserved.visible,
     mapLayers.underserved.opacity,
     mapLayers.hotspots.visible,
