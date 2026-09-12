@@ -3,6 +3,7 @@ import { getActiveCatchment } from "@wherehouse/db";
 import { z } from "zod";
 
 import { protectedProcedure, publicProcedure, router } from "../index";
+import { projectsRouter } from "./projects";
 import {
   GeoServiceError,
   getHeatmap,
@@ -67,6 +68,7 @@ export const appRouter = router({
       user: ctx.session.user,
     };
   }),
+  projects: projectsRouter,
   geo: router({
     catchment: protectedProcedure
       .input(z.object({

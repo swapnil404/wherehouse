@@ -182,6 +182,11 @@ Geo tables are **not** declared in the Drizzle schema — `drizzle-kit push` wou
 
 One design note worth keeping: `saved_site.score_snapshot` records what a site scored *under the weights in force at save time*. Without it, a user's saved list silently rewrites itself whenever the model changes and their notes stop matching reality.
 
+Projects are the user's workspaces. A project stores its use-case preset and custom weights and can
+hold up to **five** saved candidate sites. All project and site operations run through protected tRPC
+procedures and scope every read and write to the authenticated user. The save limit is enforced inside
+a transaction so simultaneous requests cannot create a sixth site.
+
 ---
 
 ## 6. Sidecar API
@@ -366,7 +371,7 @@ These phases organize the work; they are not gates. Teammates may pull forward a
 ### Phase 4 — Product surface
 
 **Vaidehi** — compare tray; PDF + GeoJSON export; saved sites UI; polish, legends, empty states, error toasts.
-**Swapnil** — `sites` and `presets` routers on `protectedProcedure`; score snapshots on save; response caching; performance pass against §9.
+**Swapnil** — protected `projects` and nested `savedSites` routers; per-user ownership checks; five-site project limit; score snapshots on save; response caching; performance pass against §9.
 **Megha** — label the 30-site validation set against the rubric, **all three of us independently, before looking at any model output**; run validation; tune weights if results are poor and document what changed and why.
 
 *Exit:* every requirement in §12 is demonstrable.
@@ -442,7 +447,7 @@ Every line in the brief maps to a deliverable and an owner. Nothing is unassigne
 - [x] Weight sliders re-score the visible map in < 250 ms with no network call
 - [ ] Hot-spots, cold-spots and underserved areas render
 - [ ] Polygon draw → batch score → ranked results
-- [ ] Isochrones + catchment population for car and walk
+- [x] Isochrones + catchment population for car and walk
 - [ ] Compare tray with ≥3 sites, PDF and GeoJSON export
 - [ ] Validation page: ρ, P@10, separation, inter-rater α, sensitivity
 - [ ] README + model card + data licenses committed
