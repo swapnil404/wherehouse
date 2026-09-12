@@ -2,6 +2,7 @@ import { ListOrderedIcon, PanelRightCloseIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { compositeScore } from "@/lib/cells";
+import { MAX_COMPARE_SITES } from "@/lib/compare";
 import { useMapStore } from "@/stores/map-store";
 
 import { panelSurface } from "./panel-styles";
@@ -51,6 +52,8 @@ export default function ResultsDock() {
   const preset = useMapStore((s) => s.preset);
   const presets = useMapStore((s) => s.presets);
   const customWeights = useMapStore((s) => s.customWeights);
+  const comparisonSites = useMapStore((s) => s.comparisonSites);
+  const toggleComparisonSite = useMapStore((s) => s.toggleComparisonSite);
 
   const weights = customWeights ?? presets?.[preset] ?? null;
 
@@ -106,6 +109,14 @@ export default function ResultsDock() {
     selection?.cell && weights
       ? { ...selection.cell, score: compositeScore(selection.cell.subscores, weights) }
       : null;
+  const selectedComparison = selection?.cell
+    ? comparisonSites.some((site) => site.h3_index === selection.cell?.h3_index)
+    : false;
+  const compareState = selectedComparison
+    ? "added"
+    : comparisonSites.length >= MAX_COMPARE_SITES
+      ? "full"
+      : "available";
 
   return (
     // `max-h` with `flex-col` rather than a set height: the card hugs the
@@ -149,6 +160,10 @@ export default function ResultsDock() {
             data={scored}
             analytics={analytics}
             weights={weights}
+            compareState={compareState}
+            onToggleCompare={() => {
+              if (selection?.cell) toggleComparisonSite(selection.cell);
+            }}
           />
         )}
       </div>

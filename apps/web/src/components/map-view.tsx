@@ -5,6 +5,7 @@ import HeatmapLegend from "./heatmap-legend";
 import LayersCard from "./layers-card";
 import PresetPicker from "./preset-picker";
 import ResultsDock from "./results-dock";
+import CompareTray from "./compare-tray";
 
 /**
  * The map, full bleed, with everything else floating over a corner of it.
@@ -64,6 +65,7 @@ export default function MapView() {
 
       <HeatmapLegend />
       <ResultsDock />
+      <CompareTray />
     </div>
   );
 }

@@ -24,6 +24,7 @@ import {
   type Weights,
 } from "@/lib/cells";
 import { buildCatchmentCells, catchmentFill, type CatchmentCell } from "@/lib/catchment";
+import { COMPARE_COLORS } from "@/lib/compare";
 import {
   HEX_SEAM_RGBA,
   SCORE_BINS,
@@ -375,6 +376,7 @@ export default function MapCanvas() {
     };
   }, [scorePoint.data, weights]);
   const selectedH3 = selectedData?.h3_index ?? null;
+  const comparisonSites = useMapStore((state) => state.comparisonSites);
   const catchmentMode = useMapStore((state) => state.catchmentMode);
   const catchmentMinutes = useMapStore((state) => state.catchmentMinutes);
   const catchmentQuery = useQuery({
@@ -728,6 +730,25 @@ export default function MapCanvas() {
             }),
           ]
         : []),
+      ...(comparisonSites.length > 0
+        ? [
+            new H3HexagonLayer<(typeof comparisonSites)[number]>({
+              ...analysisPlacement,
+              id: "comparison-cells",
+              data: comparisonSites,
+              getHexagon: (site) => site.h3_index,
+              filled: false,
+              stroked: true,
+              getLineColor: (_site, info) => [
+                ...COMPARE_COLORS[info.index].rgba,
+              ],
+              lineWidthMinPixels: 2,
+              extruded: false,
+              pickable: false,
+              opacity: 1,
+            }),
+          ]
+        : []),
       // Outline the scored cell — the only selection cue, so it carries the
       // weight a pin used to. A pin marked a coordinate, which was misleading:
       // scoring snaps to the containing cell, so the hexagon is the honest
@@ -810,6 +831,7 @@ export default function MapCanvas() {
     weights,
     weightsReady,
     selectedH3,
+    comparisonSites,
     catchmentCells,
     mapLayers.underserved.visible,
     mapLayers.underserved.opacity,

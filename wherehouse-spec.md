@@ -110,12 +110,11 @@ The sidecar is a public URL, so the Worker authenticates every request with that
 | A1 | **City of Austin municipal boundary** — all layers clipped to one polygon | This keeps zoning and every other feature consistently available. Travis County expansion requires an explicit unknown-zoning policy |
 | A2 | **Data ingested offline and static** — a repeatable pipeline is started manually; no source APIs are called at request time | Live fetches during a demo are how demos die |
 | A3 | **Three presets, equally tuned** — Retail, Warehouse, EV Charging | Configurability is an explicit evaluation criterion; three presets prove it in one gesture |
-| A4 | **Validation = 30 sites labeled by all three of us** against a written rubric, plus ~10 known-good real locations and ~10 deliberately bad points | The brief says "expert-labeled". We aren't domain experts, so we use a documented rubric and report inter-rater agreement rather than overclaiming |
-| A5 | **H3 resolution 8** (~0.74 km²/cell). The current Austin municipal-boundary build contains **1,021 cells** | Small enough to fully precompute, fine enough to be useful |
+| A4 | **H3 resolution 8** (~0.74 km²/cell). The current Austin municipal-boundary build contains **1,021 cells** | Small enough to fully precompute, fine enough to be useful |
 
 ### 4.2 Out of scope
 
-Teams/orgs/sharing (auth is login+signup only, for persisting saved sites) · payments · real-time updates · multiple metros · **transit isochrones** (needs GTFS + OpenTripPlanner — car and walk only; the brief mentions transit and we knowingly meet half of it, see §11) · end-user upload of Shapefiles/GeoTIFFs (those formats are *read by the ingestion pipeline*; the UI takes GeoJSON/WKT) · mobile layout.
+Teams/orgs/sharing (auth is login+signup only, for persisting saved sites) · payments · real-time updates · multiple metros · **transit isochrones** (needs GTFS + OpenTripPlanner — car and walk only; the brief mentions transit and we knowingly meet half of it, see §11) · end-user upload of Shapefiles/GeoTIFFs (those formats are *read by the ingestion pipeline*; the UI takes GeoJSON/WKT) · mobile layout · expert-labelled model validation (requires qualified site-selection reviewers or defensible outcome data; team opinions are not presented as expertise).
 
 ### 4.3 Risk register
 
@@ -199,7 +198,7 @@ Owned by Megha. `/health` is public; every `/v1` endpoint requires bearer authen
 | `POST /v1/score` | Composite score + weight-independent per-layer breakdown + constraint results for one point |
 | `POST /v1/score/batch` | Same for a point list, with a hard cap of 5,000 points |
 | `POST /v1/hotspots` | Getis-Ord Gi*, DBSCAN, or H3 binning; returns classified cells, clusters, and underserved areas |
-| `GET /v1/presets` · `/v1/validate/report` · `/health` | Config, validation metrics, warmup target |
+| `GET /v1/presets` · `/health` | Config and warmup target |
 
 Exact request/response shapes are defined by the sidecar's OpenAPI schema (§3.1) and generated into the TypeScript client — they are deliberately not duplicated here, because a spec that restates a contract becomes the second place it can be wrong.
 
@@ -281,18 +280,6 @@ Retail peaks at 3 competitors within 1 km; warehouse peaks at 0 within 5 km (eff
 
 Declared per preset as `{feature, op, value}` and evaluated boolean — minimum population within 5 km, not in a flood zone, allowed zone classes, maximum highway distance. Every constraint returns its actual value and pass/fail, so the UI can say "failed: population within 5 km is 18,400, needs 25,000" and the tool explains itself.
 
-### 8.6 Validation
-
-- **Spearman ρ** between model score and mean expert label across 30 sites. Target ≥ 0.7.
-- **Precision@10** — overlap between model top-10 and expert top-10.
-- **Sanity separation** — mean score of known-good real sites vs. deliberately bad points. Target gap > 35. A small gap means the model is broken regardless of what ρ says.
-- **Inter-rater agreement** (Krippendorff's α) across the three of us. Reporting this converts our weakest claim into a defensible one.
-- **Sensitivity analysis** — ±20% weight perturbation, reporting rank stability. Shows the model isn't balanced on a knife edge.
-
-Labels are assigned against a written rubric **before anyone sees model output**. Labeling after seeing scores makes the validation worthless, and we shouldn't claim it.
-
----
-
 ## 9. Frontend
 
 Owned by Vaidehi. TanStack Start + MapLibre GL + deck.gl, React state, Tailwind + shadcn/ui.
@@ -301,7 +288,7 @@ Owned by Vaidehi. TanStack Start + MapLibre GL + deck.gl, React state, Tailwind 
 
 ```
 ┌────────────────────────────────────────────────────────────────┐
-│ Wherehouse  [Retail][Warehouse][EV]        [Validation] [Login]│
+│ Wherehouse  [Retail][Warehouse][EV]                     [Login]│
 ├──────────┬─────────────────────────────────────┬───────────────┤
 │ LAYERS   │                                     │  SITE SCORE   │
 │ ☑ Heatmap│           MAP CANVAS                │    78.4  B+   │
@@ -318,7 +305,7 @@ Owned by Vaidehi. TanStack Start + MapLibre GL + deck.gl, React state, Tailwind 
 └────────────────────────────────────────────────────────────────┘
 ```
 
-**Components.** *MapCanvas* — MapLibre basemap + PMTiles from Neon Object Storage; deck.gl overlays for the score heatmap, Gi* hot/cold with a diverging ramp, POI by category, zoning fill, flood hatch, stacked isochrone bands, and editable draw tools. *LayerPanel* — per-layer toggle and opacity, legend swaps with the active layer. *WeightEditor* — presets plus six sliders, renormalized live, client-side re-score on drag; **watching the heatmap shift as you drag is the best moment in the product, so prioritize making it smooth.** *ScorePanel* — score dial, grade, a **waterfall** of per-layer contributions measured from the metro mean (a plain bar chart is boring; a waterfall shows *why*), constraint checklist, catchment table, plain-English drivers and detractors. *CompareTray* — up to 4 pinned sites with aligned subscore rows and a radar overlay. *SavedSites* — appears when logged in. *Export* — one-page PDF plus GeoJSON of pinned sites; ten lines of code and the thing analysts will actually use. *ValidationPage* — ρ, P@10, separation, α, sensitivity, and the rubric. Showing your own error bars reads as confidence, not weakness.
+**Components.** *MapCanvas* — MapLibre basemap + PMTiles from Neon Object Storage; deck.gl overlays for the score heatmap, Gi* hot/cold with a diverging ramp, POI by category, zoning fill, flood hatch, stacked isochrone bands, and editable draw tools. *LayerPanel* — per-layer toggle and opacity, legend swaps with the active layer. *WeightEditor* — presets plus six sliders, renormalized live, client-side re-score on drag; **watching the heatmap shift as you drag is the best moment in the product, so prioritize making it smooth.** *ScorePanel* — score dial, grade, a **waterfall** of per-layer contributions measured from the metro mean (a plain bar chart is boring; a waterfall shows *why*), constraint checklist, catchment table, plain-English drivers and detractors. *CompareTray* — up to 4 pinned sites with aligned subscore rows and a radar overlay. *SavedSites* — appears when logged in. *Export* — one-page PDF plus GeoJSON of pinned sites; ten lines of code and the thing analysts will actually use.
 
 **Performance targets:** initial map load < 3 s · layer toggle < 100 ms · weight slider recolor < 250 ms (no network) · click → score < 600 ms warm · isochrone render < 500 ms.
 
@@ -372,13 +359,11 @@ These phases organize the work; they are not gates. Teammates may pull forward a
 
 **Vaidehi** — compare tray; PDF + GeoJSON export; saved sites UI; polish, legends, empty states, error toasts.
 **Swapnil** — protected `projects` and nested `savedSites` routers; per-user ownership checks; five-site project limit; score snapshots on save; response caching; performance pass against §9.
-**Megha** — label the 30-site validation set against the rubric, **all three of us independently, before looking at any model output**; run validation; tune weights if results are poor and document what changed and why.
-
 *Exit:* every requirement in §12 is demonstrable.
 
 ### Phase 5 — Harden, deploy, document
 
-Feature freeze. Clean-machine test — fresh clone → `bun install` → `bun run dev`, run by someone who didn't write the setup. Deploy both halves and verify the live URL end to end. README with architecture, setup, **data provenance and licenses**, and honest limitations. Model card: what the scoring engine does, validation results, known biases, what it should *not* be used for. Demo rehearsed cold, twice, with screenshots and a fallback recording.
+Feature freeze. Clean-machine test — fresh clone → `bun install` → `bun run dev`, run by someone who didn't write the setup. Deploy both halves and verify the live URL end to end. README with architecture, setup, **data provenance and licenses**, and honest limitations. Model card: what the scoring engine does, its data inputs and formulas, known biases, and what it should *not* be used for. Demo rehearsed cold, twice, with screenshots and a fallback recording.
 
 ### 10.1 Demo script (7 minutes)
 
@@ -388,7 +373,7 @@ Feature freeze. Clean-machine test — fresh clone → `bun install` → `bun ru
 4. **(1:30)** Switch Retail → Warehouse. **The heatmap inverts** — downtown goes cold, highway-adjacent industrial goes hot. Same engine, same data, different question. Then drag a slider and watch it move live. This is the configurability criterion in one gesture and the strongest 15 seconds you have; whatever else gets cut, this must work.
 5. **(1:00)** Gi* clusters, then underserved areas — "high demand, no supply, nobody is there."
 6. **(1:00)** Drop a candidate, 20-minute drive isochrone, catchment population. Pin three, open the compare tray, log in, save the project.
-7. **(0:30)** Validation page. Close on: explainable, configurable, and measurably not making the numbers up.
+7. **(0:30)** Export the comparison and close on the saved workspace: explainable, configurable, and reusable.
 
 ---
 
@@ -425,7 +410,7 @@ Only after §12 is green, in priority order:
 | Export reports | §9 — PDF + GeoJSON | Vaidehi |
 | Routing / isochrones | §7 — precomputed OSRM, car + foot | Swapnil |
 | Catchment 10/20/30 min | §7 — `geo.catchment` reads precomputed Neon rows | Swapnil / Vaidehi |
-| Validated vs. expert-labeled sites | §8.6 | Megha |
+| Expert-labelled validation | Explicitly out of scope without qualified reviewers or defensible outcome data | — |
 | Python · GeoPandas · Shapely · H3 · sklearn | `apps/fastapi`, `pipeline/` | Megha / Swapnil |
 | FastAPI | `apps/fastapi` | Megha |
 | PostGIS | §5.4 — Neon + PostGIS, raw-SQL migrations | Swapnil |
@@ -449,6 +434,5 @@ Every line in the brief maps to a deliverable and an owner. Nothing is unassigne
 - [ ] Polygon draw → batch score → ranked results
 - [x] Isochrones + catchment population for car and walk
 - [ ] Compare tray with ≥3 sites, PDF and GeoJSON export
-- [ ] Validation page: ρ, P@10, separation, inter-rater α, sensitivity
 - [ ] README + model card + data licenses committed
 - [ ] Demo rehearsed cold, twice, end to end

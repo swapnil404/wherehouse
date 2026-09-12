@@ -1,6 +1,7 @@
 import { create } from "zustand";
 
 import type { PresetName, ScoredCell, SubscoreKey, Weights } from "@/lib/cells";
+import { toggleComparedSite } from "@/lib/compare";
 import type { HotspotMethod } from "@/lib/hotspots";
 import type { GridAnalytics } from "@/lib/score-analytics";
 import {
@@ -247,6 +248,8 @@ interface MapStore {
    * first row would make the second row cost two clicks.
    */
   selectionOrigin: "map" | "list" | null;
+  /** Raw score responses kept for live, weight-adjusted side-by-side comparison. */
+  comparisonSites: ScoredCell[];
   /** Shared by the score controls and the map's precomputed reach overlay. */
   catchmentMode: ReachabilityMode;
   catchmentMinutes: number;
@@ -265,6 +268,9 @@ interface MapStore {
   setRankedCells: (cells: RankedCell[] | null) => void;
   setSelectionOrigin: (origin: "map" | "list" | null) => void;
   setSelection: (selection: SelectionState | null) => void;
+  toggleComparisonSite: (cell: ScoredCell) => void;
+  removeComparisonSite: (h3Index: string) => void;
+  clearComparisonSites: () => void;
   setCatchmentMode: (mode: ReachabilityMode) => void;
   setCatchmentMinutes: (minutes: number) => void;
   /** Called by the dock. Consumed and cleared by the canvas. */
@@ -285,6 +291,7 @@ export const useMapStore = create<MapStore>((set) => ({
   selection: null,
   pendingFocusH3: null,
   selectionOrigin: null,
+  comparisonSites: [],
   catchmentMode: "car",
   catchmentMinutes: 20,
   toggleLayer: (id) =>
@@ -315,6 +322,7 @@ export const useMapStore = create<MapStore>((set) => ({
       rankedCells: null,
       selection: null,
       selectionOrigin: null,
+      comparisonSites: [],
     }),
   setEligibleOnly: (eligibleOnly) => set({ eligibleOnly }),
   setWeight: (key, value, base) =>
@@ -324,6 +332,17 @@ export const useMapStore = create<MapStore>((set) => ({
   resetWeights: () => set({ customWeights: null }),
   setRankedCells: (rankedCells) => set({ rankedCells }),
   setSelection: (selection) => set({ selection }),
+  toggleComparisonSite: (cell) =>
+    set((state) => ({
+      comparisonSites: toggleComparedSite(state.comparisonSites, cell),
+    })),
+  removeComparisonSite: (h3Index) =>
+    set((state) => ({
+      comparisonSites: state.comparisonSites.filter(
+        (site) => site.h3_index !== h3Index,
+      ),
+    })),
+  clearComparisonSites: () => set({ comparisonSites: [] }),
   setCatchmentMode: (catchmentMode) =>
     set({ catchmentMode, catchmentMinutes: 20 }),
   setCatchmentMinutes: (catchmentMinutes) => set({ catchmentMinutes }),
