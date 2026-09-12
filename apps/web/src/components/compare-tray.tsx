@@ -19,6 +19,15 @@ import { panelSurface } from "./panel-styles";
 
 const RADAR_CENTER = 64;
 const RADAR_RADIUS = 48;
+const RADAR_LABELS = ["Resident", "Roads", "Business", "Zoning", "Flood", "Air"] as const;
+const RADAR_LABEL_POSITIONS = [
+  { x: 64, y: 5, anchor: "middle" },
+  { x: 112, y: 35, anchor: "start" },
+  { x: 112, y: 98, anchor: "start" },
+  { x: 64, y: 127, anchor: "middle" },
+  { x: 16, y: 98, anchor: "end" },
+  { x: 16, y: 35, anchor: "end" },
+] as const;
 
 function radarPoint(index: number, value: number) {
   const angle = (Math.PI * 2 * index) / SUBSCORE_KEYS.length - Math.PI / 2;
@@ -53,11 +62,17 @@ export default function CompareTray() {
 
   const weights = customWeights ?? presets?.[preset] ?? {};
   const scores = sites.map((site) => compositeScore(site.subscores, weights));
+  // Grow by one useful data-column at a time instead of reserving room for
+  // all four possible sites. The viewport cap keeps the tray usable on small
+  // screens, where the table becomes horizontally scrollable.
+  const trayWidth = 328 + sites.length * 132;
+  const tableMinWidth = 112 + sites.length * 112;
 
   return (
     <aside
-      className={`pointer-events-auto absolute bottom-20 left-1/2 z-20 w-[min(760px,calc(100%-2rem))] -translate-x-1/2 overflow-hidden ${panelSurface}`}
+      className={`pointer-events-auto absolute bottom-20 left-1/2 z-20 max-w-[calc(100%-2rem)] -translate-x-1/2 overflow-hidden transition-[width] duration-200 ${panelSurface}`}
       aria-label="Site comparison"
+      style={{ width: trayWidth }}
     >
       <div className="flex items-center gap-2 px-3 py-2">
         <button
@@ -90,13 +105,13 @@ export default function CompareTray() {
       </div>
 
       {expanded ? (
-        <div className="grid max-h-[min(390px,calc(100vh-9rem))] grid-cols-[150px_minmax(0,1fr)] border-t border-border">
+        <div className="grid max-h-[min(390px,calc(100vh-9rem))] grid-cols-[166px_minmax(0,1fr)] border-t border-border">
           <div className="flex items-center justify-center border-r border-border p-3">
             <svg
               aria-label="Subscore radar comparison"
-              className="h-32 w-32 overflow-visible"
+              className="h-36 w-40 overflow-visible font-sans"
               role="img"
-              viewBox="0 0 128 128"
+              viewBox="-16 -6 160 140"
             >
               {[25, 50, 75, 100].map((level) => (
                 <polygon
@@ -128,13 +143,32 @@ export default function CompareTray() {
                   strokeWidth="1.5"
                 />
               ))}
+              {RADAR_LABELS.map((label, index) => {
+                const position = RADAR_LABEL_POSITIONS[index];
+                return (
+                  <text
+                    aria-hidden="true"
+                    fill="rgba(255,255,255,0.52)"
+                    fontSize="7.5"
+                    key={label}
+                    textAnchor={position.anchor}
+                    x={position.x}
+                    y={position.y}
+                  >
+                    {label}
+                  </text>
+                );
+              })}
             </svg>
           </div>
 
           <div className="scrollbar-subtle min-w-0 overflow-x-auto">
             <div
-              className="grid min-w-[480px]"
-              style={{ gridTemplateColumns: `112px repeat(${sites.length}, minmax(86px, 1fr))` }}
+              className="grid"
+              style={{
+                gridTemplateColumns: `112px repeat(${sites.length}, minmax(112px, 1fr))`,
+                minWidth: tableMinWidth,
+              }}
             >
               <div className="border-b border-border p-2 text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
                 Measure
