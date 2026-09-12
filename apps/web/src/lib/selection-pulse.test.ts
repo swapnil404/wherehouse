@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { cellToBoundary, cellToLatLng, latLngToCell } from "h3-js";
 
+import { FOCUS_LINE, FOCUS_RGB } from "./focus-mark";
 import {
   PULSE_PERIOD_MS,
+  RING_COLOR,
   RING_WIDTH,
   expandedHexRing,
   pulseFrame,
@@ -56,6 +58,16 @@ describe("pulseFrame", () => {
       assert.ok(frame.scale >= 1);
       assert.ok(frame.alpha >= 0 && frame.alpha <= 255);
     }
+  });
+
+  test("the travelling ring carries the focus colour at its own alpha", () => {
+    // The ring and the beacon have to be the same mark in two forms. Reading
+    // the colour off the frame rather than rebuilding it at the call site is
+    // what stops the beacon being left behind on a future palette change.
+    const frame = pulseFrame(0.3 * PULSE_PERIOD_MS);
+    assert.deepEqual(frame.color.slice(0, 3), FOCUS_RGB);
+    assert.equal(frame.color[3], frame.alpha);
+    assert.deepEqual(RING_COLOR, FOCUS_LINE);
   });
 
   test("the resting ring is a constant the beacon never touches", () => {

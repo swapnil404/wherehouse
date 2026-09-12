@@ -1,5 +1,7 @@
 import { cellToBoundary, cellToLatLng } from "h3-js";
 
+import { FOCUS_LINE, focusLineAt } from "./focus-mark";
+
 /**
  * A locator beacon on the scored cell, for as long as Reach is on.
  *
@@ -24,13 +26,15 @@ export const PULSE_PERIOD_MS = 1200;
 
 /** Resting ring, which the beacon draws on top of and never replaces. */
 export const RING_WIDTH = 3;
-export const RING_COLOR: [number, number, number, number] = [255, 255, 255, 255];
+export const RING_COLOR = FOCUS_LINE;
 
 export interface PulseFrame {
   /** Hexagon radius multiplier for the travelling ring. */
   scale: number;
   /** Alpha of the travelling ring, 0-255. */
   alpha: number;
+  /** The travelling ring's colour at that alpha, ready for deck.gl. */
+  color: [number, number, number, number];
 }
 
 /**
@@ -50,7 +54,8 @@ export function pulseFrame(elapsedMs: number): PulseFrame {
   const t = wrapped / PULSE_PERIOD_MS;
   const fade = (1 - t) ** 2;
 
-  return { scale: 1 + 0.75 * t, alpha: Math.round(230 * fade) };
+  const alpha = Math.round(230 * fade);
+  return { scale: 1 + 0.75 * t, alpha, color: focusLineAt(alpha) };
 }
 
 /**

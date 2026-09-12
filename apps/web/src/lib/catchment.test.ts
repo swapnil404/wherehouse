@@ -7,6 +7,8 @@ import {
   CATCHMENT_LINE_WIDTH,
   buildCatchmentRegions,
 } from "./catchment";
+import { FOCUS_LINE } from "./focus-mark";
+import { RING_COLOR } from "./selection-pulse";
 
 const CENTRE = latLngToCell(30.2672, -97.7431, 8);
 const NEAR = gridDisk(CENTRE, 1); // 7 cells
@@ -76,8 +78,16 @@ describe("buildCatchmentRegions", () => {
 });
 
 describe("contour styling", () => {
-  test("is opaque white, matching the selected-cell ring", () => {
-    assert.deepEqual(CATCHMENT_LINE_COLOR, [255, 255, 255, 255]);
+  test("matches the selected-cell ring, whatever the focus colour is", () => {
+    // Asserted against the shared constant rather than a literal, so this
+    // keeps testing that the marks agree instead of re-testing a hex code.
+    // It is the property that broke when the compare tray claimed white.
+    assert.deepEqual(CATCHMENT_LINE_COLOR, FOCUS_LINE);
+    assert.deepEqual(CATCHMENT_LINE_COLOR, RING_COLOR);
+  });
+
+  test("is fully opaque", () => {
+    assert.equal(CATCHMENT_LINE_COLOR[3], 255);
   });
 
   test("is one weight for every band", () => {

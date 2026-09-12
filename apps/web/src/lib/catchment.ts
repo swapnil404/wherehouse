@@ -1,5 +1,7 @@
 import { cellsToMultiPolygon } from "h3-js";
 
+import { FOCUS_LINE } from "./focus-mark";
+
 /**
  * Reachability, drawn as one contour.
  *
@@ -35,18 +37,16 @@ export interface CatchmentRegion {
 }
 
 /**
- * White, the same as the selected-cell ring.
- *
- * Deliberate: both marks answer "which part of the map am I asking about", so
- * they share a colour and differ by form — a single hexagon against a
- * dissolved area. It also keeps reachability out of the ramps entirely, where
- * red now means score and cyan means a drawn study area.
+ * The shared focus colour, the same as the selected-cell ring — both marks
+ * answer "which part of the map am I asking about", so they differ by form (a
+ * single hexagon against a dissolved area) rather than by hue. See
+ * [`focus-mark`](./focus-mark.ts) for why that hue is what it is.
  *
  * One weight for every band, not a ramp. The old per-band fade existed to
  * separate nested contours; with a single outline on screen it would only mean
  * that asking for a wider area got you a fainter answer.
  */
-export const CATCHMENT_LINE_COLOR: [number, number, number, number] = [255, 255, 255, 255];
+export const CATCHMENT_LINE_COLOR = FOCUS_LINE;
 export const CATCHMENT_LINE_WIDTH = 2;
 
 /**

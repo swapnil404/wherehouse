@@ -4,6 +4,7 @@ import {
   CarFrontIcon,
   CheckIcon,
   FootprintsIcon,
+  GitCompareArrowsIcon,
   LoaderCircleIcon,
   TriangleAlertIcon,
   XIcon,
@@ -75,6 +76,8 @@ interface ScorePanelProps {
   data: ScoreData | null;
   analytics: GridAnalytics | null;
   weights: Weights | null;
+  compareState: "available" | "added" | "full";
+  onToggleCompare: () => void;
 }
 
 const SCORE_GLYPHS = {
@@ -313,6 +316,8 @@ export default function ScorePanel({
   data,
   analytics,
   weights,
+  compareState,
+  onToggleCompare,
 }: ScorePanelProps) {
   const ready = data && analytics && weights;
   const percentile =
@@ -396,6 +401,28 @@ export default function ScorePanel({
               Beats {percentile.toFixed(0)}% of {analytics!.cellCount} cells scored in Austin
             </p>
           ) : null}
+
+          <button
+            className={`mt-3 flex w-full items-center justify-center gap-2 rounded-md px-3 py-2 text-xs font-medium transition-colors focus-visible:ring-1 focus-visible:ring-ring/50 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45 ${
+              compareState === "added"
+                ? "bg-white/10 text-foreground hover:bg-white/15"
+                : "bg-accent text-accent-foreground hover:bg-accent/90"
+            }`}
+            disabled={compareState === "full"}
+            onClick={onToggleCompare}
+            type="button"
+          >
+            {compareState === "added" ? (
+              <CheckIcon className="size-3.5" aria-hidden="true" />
+            ) : (
+              <GitCompareArrowsIcon className="size-3.5" aria-hidden="true" />
+            )}
+            {compareState === "added"
+              ? "Remove from compare"
+              : compareState === "full"
+                ? "Compare tray full"
+                : "Add to compare"}
+          </button>
 
           {waterfall ? (
             <div className="mt-4">

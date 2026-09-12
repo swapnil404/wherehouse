@@ -1,25 +1,18 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import { Button } from "@wherehouse/ui/components/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@wherehouse/ui/components/dropdown-menu";
 import { Skeleton } from "@wherehouse/ui/components/skeleton";
+import { LogOutIcon } from "lucide-react";
+import { useState } from "react";
 
 import { authClient } from "@/lib/auth-client";
 
 export default function UserMenu() {
   const navigate = useNavigate();
   const { data: session, isPending } = authClient.useSession();
+  const [isSigningOut, setIsSigningOut] = useState(false);
 
   if (isPending) {
-    // Matches the Button's default `h-8` so the header does not shift when the
-    // session resolves.
-    return <Skeleton className="h-8 w-24" />;
+    return <Skeleton className="h-8 w-36 rounded-md" />;
   }
 
   if (!session) {
@@ -31,38 +24,39 @@ export default function UserMenu() {
   }
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger render={<Button variant="ghost" />}>
-        {session.user.name}
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="min-w-52">
-        {/* Name and email are a heading, not a row. They were `DropdownMenuItem`
-            before, which gave them hover, focus and a pointer, so the menu
-            offered two things that looked clickable and one that did anything. */}
-        <DropdownMenuLabel className="font-normal">
-          <span className="block text-xs font-medium text-foreground">
-            {session.user.name}
-          </span>
-          <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
-            {session.user.email}
-          </span>
-        </DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem
-          variant="destructive"
-          onClick={() => {
-            authClient.signOut({
-              fetchOptions: {
-                onSuccess: () => {
-                  navigate({ to: "/login" });
-                },
+    <div className="flex shrink-0 items-center gap-2">
+      <div className="hidden items-center gap-2.5 border-r border-white/10 pr-3 md:flex">
+        <span className="grid size-7 place-items-center rounded-full bg-white/8 text-[11px] font-semibold text-foreground ring-1 ring-white/10">
+          {session.user.name.trim().charAt(0).toUpperCase()}
+        </span>
+        <span className="max-w-40 truncate text-xs font-medium text-foreground/85">
+          {session.user.name}
+        </span>
+      </div>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        disabled={isSigningOut}
+        className="gap-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+        onClick={() => {
+          setIsSigningOut(true);
+          authClient.signOut({
+            fetchOptions: {
+              onSuccess: () => {
+                navigate({ to: "/login" });
               },
-            });
-          }}
-        >
-          Sign out
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+              onError: () => {
+                setIsSigningOut(false);
+              },
+            },
+          });
+        }}
+      >
+        <LogOutIcon aria-hidden />
+        <span className="hidden sm:inline">{isSigningOut ? "Logging out…" : "Log out"}</span>
+        <span className="sr-only sm:hidden">{isSigningOut ? "Logging out" : "Log out"}</span>
+      </Button>
+    </div>
   );
 }

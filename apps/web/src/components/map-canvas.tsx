@@ -31,6 +31,7 @@ import {
   buildCatchmentRegions,
   type CatchmentRegion,
 } from "@/lib/catchment";
+import { COMPARE_COLORS } from "@/lib/compare";
 import {
   HEX_SEAM_RGBA,
   binIndexIn,
@@ -111,6 +112,15 @@ const BASEMAP_STYLE =
 const EMPTY_CELLS: HeatmapCell[] = [];
 const EMPTY_HOTSPOT_CELLS: HotspotCell[] = [];
 const EMPTY_UNDERSERVED: UnderservedCell[] = [];
+
+// Every analysis layer is a flat surface whose visual stacking is already
+// controlled by `beforeId` and array order. Leaving depth testing on makes
+// those coplanar polygons compete with MapLibre's basemap on some GPUs,
+// producing horizontal z-fighting stripes across otherwise solid hexes.
+const FLAT_LAYER_PARAMETERS = {
+  depthCompare: "always",
+  depthWriteEnabled: false,
+} as const;
 
 /**
  * POI names come from OpenStreetMap, so they are arbitrary user-contributed
@@ -456,6 +466,7 @@ export default function MapCanvas() {
     };
   }, [scorePoint.data, weights]);
   const selectedH3 = selectedData?.h3_index ?? null;
+  const comparisonSites = useMapStore((state) => state.comparisonSites);
   const catchmentOn = useMapStore((state) => state.catchmentOn);
   const catchmentMode = useMapStore((state) => state.catchmentMode);
   const catchmentMinutes = useMapStore((state) => state.catchmentMinutes);
@@ -987,6 +998,7 @@ export default function MapCanvas() {
               ...placement,
               id: "score-heatmap",
               data: visibleCells,
+              parameters: FLAT_LAYER_PARAMETERS,
               getHexagon: (d) => d.h3Index,
               getFillColor: (d) => colorIn(valueOf(d), measure.bins),
               // Soft seams preserve the H3 cell boundaries without turning
@@ -1017,6 +1029,7 @@ export default function MapCanvas() {
               ...analysisPlacement,
               id: "catchment-bands",
               data: catchmentRegions,
+              parameters: FLAT_LAYER_PARAMETERS,
               getPolygon: (region) => region.rings,
               filled: false,
               stroked: true,
@@ -1026,6 +1039,26 @@ export default function MapCanvas() {
               lineWidthMinPixels: 1.5,
               opacity: 1,
               pickable: false,
+            }),
+          ]
+        : []),
+      ...(comparisonSites.length > 0
+        ? [
+            new H3HexagonLayer<(typeof comparisonSites)[number]>({
+              ...analysisPlacement,
+              id: "comparison-cells",
+              data: comparisonSites,
+              parameters: FLAT_LAYER_PARAMETERS,
+              getHexagon: (site) => site.h3_index,
+              filled: false,
+              stroked: true,
+              getLineColor: (_site, info) => [
+                ...COMPARE_COLORS[info.index].rgba,
+              ],
+              lineWidthMinPixels: 2,
+              extruded: false,
+              pickable: false,
+              opacity: 1,
             }),
           ]
         : []),
@@ -1040,6 +1073,7 @@ export default function MapCanvas() {
               ...analysisPlacement,
               id: "selected-cell",
               data: [{ h3Index: selectedH3 }],
+              parameters: FLAT_LAYER_PARAMETERS,
               getHexagon: (d) => d.h3Index,
               filled: false,
               stroked: true,
@@ -1069,6 +1103,7 @@ export default function MapCanvas() {
               ...analysisPlacement,
               id: "underserved-cells",
               data: underservedCells,
+              parameters: FLAT_LAYER_PARAMETERS,
               getHexagon: (d) => d.h3Index,
               filled: true,
               getFillColor: UNDERSERVED_FILL,
@@ -1090,6 +1125,7 @@ export default function MapCanvas() {
               ...analysisPlacement,
               id: "hotspot-regions",
               data: regions,
+              parameters: FLAT_LAYER_PARAMETERS,
               getPolygon: (d) => d.rings,
               filled: true,
               getFillColor: (d) => (d.tone === "hot" ? HOT_FILL : COLD_FILL),
@@ -1116,6 +1152,7 @@ export default function MapCanvas() {
             new PolygonLayer<{ ring: Position[] }>({
               ...analysisPlacement,
               id: "study-area",
+              parameters: FLAT_LAYER_PARAMETERS,
               data: [{ ring: studyAreaRing(studyArea) }],
               getPolygon: (d) => d.ring,
               filled: true,
@@ -1138,6 +1175,7 @@ export default function MapCanvas() {
             new PathLayer<{ path: Position[] }>({
               ...analysisPlacement,
               id: "study-area-draft-path",
+              parameters: FLAT_LAYER_PARAMETERS,
               data: [{ path: draftPreview.path }],
               getPath: (d) => d.path,
               getColor: STUDY_AREA_DRAFT_LINE,
@@ -1152,6 +1190,7 @@ export default function MapCanvas() {
             new ScatterplotLayer<Position>({
               ...analysisPlacement,
               id: "study-area-draft-corners",
+              parameters: FLAT_LAYER_PARAMETERS,
               data: draftPreview.corners,
               getPosition: (d) => d,
               getFillColor: STUDY_AREA_LINE,
@@ -1168,6 +1207,7 @@ export default function MapCanvas() {
             new PolygonLayer<{ ring: Position[] }>({
               ...analysisPlacement,
               id: "study-area-draft-radius",
+              parameters: FLAT_LAYER_PARAMETERS,
               data: [{ ring: draftPreview.ring }],
               getPolygon: (d) => d.ring,
               filled: true,
@@ -1188,6 +1228,7 @@ export default function MapCanvas() {
             new ScatterplotLayer<Position>({
               ...analysisPlacement,
               id: "study-area-draft-centre",
+              parameters: FLAT_LAYER_PARAMETERS,
               data: [draftPreview.center],
               getPosition: (d) => d,
               getFillColor: STUDY_AREA_LINE,
@@ -1210,6 +1251,7 @@ export default function MapCanvas() {
     measure,
     weightsReady,
     selectedH3,
+    comparisonSites,
     catchmentRegions,
     mapLayers.underserved.visible,
     mapLayers.underserved.opacity,
@@ -1239,11 +1281,12 @@ export default function MapCanvas() {
     return new PolygonLayer<{ ring: [number, number][] }>({
       ...placement,
       id: "selected-cell-pulse",
+      parameters: FLAT_LAYER_PARAMETERS,
       data: [{ ring: expandedHexRing(selectedH3, pulseState.scale) }],
       getPolygon: (d) => d.ring,
       filled: false,
       stroked: true,
-      getLineColor: [255, 255, 255, pulseState.alpha],
+      getLineColor: pulseState.color,
       getLineWidth: 2,
       lineWidthUnits: "pixels",
       lineWidthMinPixels: 2,
