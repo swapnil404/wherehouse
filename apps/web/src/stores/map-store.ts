@@ -309,6 +309,8 @@ interface MapStore {
   toggleLayer: (id: LayerId) => void;
   setLayerOpacity: (id: LayerId, opacity: number) => void;
   setPreset: (preset: PresetName) => void;
+  /** Restores a saved project's use case and priorities in one update. */
+  applyProjectSetup: (preset: PresetName, weights: Weights) => void;
   setEligibleOnly: (eligibleOnly: boolean) => void;
   setHeatmapStats: (stats: HeatmapStats | null) => void;
   setHotspotStats: (stats: HotspotStats | null) => void;
@@ -393,6 +395,30 @@ export const useMapStore = create<MapStore>((set) => ({
       comparisonSites: [],
       studyAreaSites: null,
       studyAreaScoreStatus: { pending: false, error: null },
+    }),
+  // Opening a project is a preset change *and* a weight change arriving
+  // together, so it has to land in one update — setting them in sequence would
+  // render once with the new preset against the old project's priorities.
+  //
+  // Only clears the preset-specific state when the preset actually moves. A
+  // project that differs from the current map by weights alone leaves the open
+  // selection and the shortlist alone, exactly as dragging a slider does, since
+  // both re-score from cached subscores without a refetch.
+  applyProjectSetup: (preset, weights) =>
+    set((state) => {
+      const customWeights = Object.keys(weights).length > 0 ? weights : null;
+      if (state.preset === preset) return { customWeights };
+      return {
+        preset,
+        customWeights,
+        hotspotStats: null,
+        rankedCells: null,
+        selection: null,
+        selectionOrigin: null,
+        comparisonSites: [],
+        studyAreaSites: null,
+        studyAreaScoreStatus: { pending: false, error: null },
+      };
     }),
   setEligibleOnly: (eligibleOnly) => set({ eligibleOnly }),
   setWeight: (key, value, base) =>

@@ -4,6 +4,7 @@ import type { TRPCOptionsProxy } from "@trpc/tanstack-react-query";
 import type { AppRouter } from "@wherehouse/api/routers/index";
 import { Toaster } from "@wherehouse/ui/components/sonner";
 
+import GeoWarmup from "../components/geo-warmup";
 import appCss from "../index.css?url";
 export interface RouterAppContext {
   trpc: TRPCOptionsProxy<AppRouter>;
@@ -45,6 +46,9 @@ function RootDocument() {
         <div className="h-svh">
           <Outlet />
         </div>
+        {/* Every route, not just the dashboard: the sidecar's ~50s cold start
+            is best paid while someone is on the login screen. */}
+        <GeoWarmup />
         <Toaster richColors />
         <Scripts />
       </body>

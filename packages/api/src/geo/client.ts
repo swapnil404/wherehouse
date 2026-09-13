@@ -84,6 +84,37 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+/**
+ * How long one warmup probe waits before giving up.
+ *
+ * Short on purpose. Render cold-starts in roughly 50 seconds, and a probe that
+ * simply waited that out would hold a Worker subrequest open for the whole
+ * spin-up to learn one boolean. The caller polls instead, so each attempt is
+ * cheap and the UI hears the service is up within a few seconds of it being
+ * up. A warm sidecar answers this in well under a second.
+ */
+const HEALTH_TIMEOUT_MS = 8_000;
+
+/**
+ * Warmup probe — `true` once the sidecar answers.
+ *
+ * Never throws. This is a diagnostic, not an operation: a cold start is the
+ * expected case rather than a failure, and the caller's only question is
+ * whether to keep waiting. Reporting that as a rejected promise would put a
+ * "geo service unavailable" error in front of a user whose service is merely
+ * two seconds from being ready.
+ */
+export async function getHealth(): Promise<boolean> {
+  try {
+    await request<unknown>("/health", {
+      signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS),
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function getPresets(): Promise<GeoPresets> {
   return request<GeoPresets>("/v1/presets");
 }
