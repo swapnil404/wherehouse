@@ -38,6 +38,7 @@ import {
   type GridAnalytics,
   type NarrativeItem,
 } from "@/lib/score-analytics";
+import { describeStudyArea } from "@/lib/study-area";
 import { useMapStore, type ReachabilityMode } from "@/stores/map-store";
 import { useTRPC } from "@/utils/trpc";
 
@@ -336,6 +337,8 @@ export default function ScorePanel({
   const narrative = waterfall && analytics ? buildNarrative(waterfall, analytics) : null;
   const failedRuleCount = data?.constraints.filter((constraint) => !constraint.pass).length ?? 0;
   const preset = useMapStore((state) => state.preset);
+  const studyArea = useMapStore((state) => state.studyArea);
+  const studyAreaSites = useMapStore((state) => state.studyAreaSites);
 
   // No positioning or elevation here any more. This is the body of the
   // results dock's "This site" tab, so the dock owns width, scrolling and
@@ -431,6 +434,11 @@ export default function ScorePanel({
           <SiteExportActions
             preset={preset}
             sites={[data]}
+            scope={studyArea && studyAreaSites ? {
+              label: describeStudyArea(studyArea),
+              cellCount: studyAreaSites.length,
+              area: studyArea,
+            } : undefined}
             weights={weights ?? {}}
           />
 

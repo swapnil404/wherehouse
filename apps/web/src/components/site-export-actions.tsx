@@ -7,12 +7,14 @@ import {
   downloadSitesGeoJson,
   downloadSitesPdf,
   type ExportSite,
+  type SiteExportInput,
 } from "@/lib/site-exports";
 
 interface SiteExportActionsProps {
   sites: readonly ExportSite[];
   preset: PresetName;
   weights: Weights;
+  scope?: SiteExportInput["scope"];
   variant?: "toolbar" | "panel";
 }
 
@@ -20,10 +22,11 @@ export default function SiteExportActions({
   sites,
   preset,
   weights,
+  scope,
   variant = "panel",
 }: SiteExportActionsProps) {
   const [pdfPending, setPdfPending] = useState(false);
-  const input = { sites, preset, weights };
+  const input = { sites, preset, weights, scope };
   const base =
     variant === "toolbar"
       ? "flex items-center gap-1 rounded-md px-1.5 py-1 text-[10px] text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring/50 focus-visible:outline-none disabled:opacity-50"

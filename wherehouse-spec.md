@@ -305,7 +305,7 @@ Owned by Vaidehi. TanStack Start + MapLibre GL + deck.gl, React state, Tailwind 
 └────────────────────────────────────────────────────────────────┘
 ```
 
-**Components.** *MapCanvas* — MapLibre basemap + PMTiles from Neon Object Storage; deck.gl overlays for the score heatmap, Gi* hot/cold with a diverging ramp, POI by category, zoning fill, flood hatch, stacked isochrone bands, and editable draw tools. *LayerPanel* — per-layer toggle and opacity, legend swaps with the active layer. *WeightEditor* — presets plus six sliders, renormalized live, client-side re-score on drag; **watching the heatmap shift as you drag is the best moment in the product, so prioritize making it smooth.** *ScorePanel* — score dial, grade, a **waterfall** of per-layer contributions measured from the metro mean (a plain bar chart is boring; a waterfall shows *why*), constraint checklist, catchment table, plain-English drivers and detractors. *CompareTray* — up to 4 pinned sites with aligned subscore rows and a radar overlay. *SavedSites* — appears when logged in. *Export* — one-page PDF plus GeoJSON of pinned sites; ten lines of code and the thing analysts will actually use.
+**Components.** *MapCanvas* — MapLibre basemap + PMTiles from Neon Object Storage; deck.gl overlays for the score heatmap, Gi* hot/cold with a diverging ramp, POI by category, zoning fill, flood hatch, stacked isochrone bands, and editable draw tools. A committed study area is sent through `score.batch`; its complete results drive the narrowed shortlist and area exports. *LayerPanel* — per-layer toggle and opacity, legend swaps with the active layer. *WeightEditor* — presets plus six sliders, renormalized live, client-side re-score on drag; **watching the heatmap shift as you drag is the best moment in the product, so prioritize making it smooth.** *ScorePanel* — score dial, grade, a **waterfall** of per-layer contributions measured from the metro mean (a plain bar chart is boring; a waterfall shows *why*), constraint checklist, catchment table, plain-English drivers and detractors. *CompareTray* — up to 4 pinned sites with aligned subscore rows and a radar overlay. *SavedSites* — appears when logged in. *Export* — PDF decision report plus GeoJSON for one site, compared sites, or the top batch-scored candidates inside a drawn area.
 
 **Performance targets:** initial map load < 3 s · layer toggle < 100 ms · weight slider recolor < 250 ms (no network) · click → score < 600 ms warm · isochrone render < 500 ms.
 
@@ -431,7 +431,7 @@ Every line in the brief maps to a deliverable and an owner. Nothing is unassigne
 - [x] Three presets produce visibly different heatmaps
 - [x] Weight sliders re-score the visible map in < 250 ms with no network call
 - [ ] Hot-spots, cold-spots and underserved areas render
-- [ ] Polygon draw → batch score → ranked results
+- [x] Polygon draw → batch score → ranked results
 - [x] Isochrones + catchment population for car and walk
 - [x] Compare tray with ≥3 sites, PDF and GeoJSON export
 - [ ] README + model card + data licenses committed

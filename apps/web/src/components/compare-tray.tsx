@@ -13,6 +13,7 @@ import {
   type Subscores,
 } from "@/lib/cells";
 import { COMPARE_COLORS, MAX_COMPARE_SITES } from "@/lib/compare";
+import { describeStudyArea } from "@/lib/study-area";
 import { useMapStore } from "@/stores/map-store";
 
 import { panelSurface } from "./panel-styles";
@@ -53,6 +54,8 @@ export default function CompareTray() {
   const preset = useMapStore((state) => state.preset);
   const presets = useMapStore((state) => state.presets);
   const customWeights = useMapStore((state) => state.customWeights);
+  const studyArea = useMapStore((state) => state.studyArea);
+  const studyAreaSites = useMapStore((state) => state.studyAreaSites);
   const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
@@ -98,6 +101,11 @@ export default function CompareTray() {
         <SiteExportActions
           preset={preset}
           sites={sites}
+          scope={studyArea && studyAreaSites ? {
+            label: describeStudyArea(studyArea),
+            cellCount: studyAreaSites.length,
+            area: studyArea,
+          } : undefined}
           variant="toolbar"
           weights={weights}
         />

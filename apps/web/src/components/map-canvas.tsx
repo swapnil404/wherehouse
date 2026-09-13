@@ -287,6 +287,7 @@ export default function MapCanvas() {
 
   const setRankedCells = useMapStore((s) => s.setRankedCells);
   const setSelection = useMapStore((s) => s.setSelection);
+  const setStudyAreaScores = useMapStore((s) => s.setStudyAreaScores);
   const pendingFocusH3 = useMapStore((s) => s.pendingFocusH3);
   const clearPendingFocus = useMapStore((s) => s.clearPendingFocus);
 
@@ -403,10 +404,9 @@ export default function MapCanvas() {
    * The cells the reader is actually asking about.
    *
    * Two narrowings, applied together: the drawn study area and the
-   * eligibility filter. Both cut the same array, which is what keeps the map
-   * and the shortlist from ever disagreeing — `rankedCells` is built from
-   * this, so drawing a boundary reorders the shortlist in the same frame the
-   * heatmap shrinks to it, with no request.
+   * eligibility filter. Both cut the same array, which keeps the map and the
+   * shortlist from disagreeing. The grid narrows immediately; the shortlist
+   * then switches to the complete batch-score response when it lands.
    *
    * The analysis overlays are deliberately *not* cut this way. Gi* and DBSCAN
    * run across the whole grid, so clipping a cluster to a hand-drawn boundary
@@ -421,6 +421,53 @@ export default function MapCanvas() {
     [areaCells, eligibleOnly],
   );
 
+  // A heatmap row is intentionally compact and has no hard-rule detail. Once
+  // an area is committed, score every selected centroid through the batch
+  // endpoint so the shortlist and exports have complete, authoritative rows.
+  const areaPoints = useMemo(
+    () =>
+      studyArea
+        ? areaCells.map((cell) => {
+            const [lat, lon] = cellToLatLng(cell.h3Index);
+            return { lat, lon };
+          })
+        : [],
+    [areaCells, studyArea],
+  );
+  const studyAreaQuery = useQuery({
+    queryKey: ["geo.scoreBatch", preset, areaCells.map((cell) => cell.h3Index)],
+    queryFn: () =>
+      trpcClient.geo.scoreBatch.mutate({
+        points: areaPoints,
+        preset,
+      }),
+    enabled: studyArea !== null && areaPoints.length > 0,
+    staleTime: Infinity,
+  });
+  const studyAreaError = studyAreaQuery.error;
+
+  useEffect(() => {
+    if (!studyArea) {
+      setStudyAreaScores(null, { pending: false, error: null });
+      return;
+    }
+    if (areaPoints.length === 0) {
+      setStudyAreaScores([], { pending: false, error: null });
+      return;
+    }
+    setStudyAreaScores(studyAreaQuery.data?.results ?? null, {
+      pending: studyAreaQuery.isPending,
+      error: studyAreaError ? studyAreaError.message : null,
+    });
+  }, [
+    studyArea,
+    areaPoints.length,
+    studyAreaQuery.data,
+    studyAreaQuery.isPending,
+    studyAreaError,
+    setStudyAreaScores,
+  ]);
+
   /**
    * Top of the grid under the live weights.
    *
@@ -430,7 +477,18 @@ export default function MapCanvas() {
    */
   const rankedCells = useMemo(() => {
     const scored: { h3Index: string; score: number; eligible: boolean }[] = [];
-    for (const cell of visibleCells) {
+    const cellsToRank = studyAreaQuery.data
+      ? studyAreaQuery.data.results
+          .filter((cell) => !eligibleOnly || cell.eligible)
+          .map((cell) => ({
+            h3Index: cell.h3_index,
+            eligible: cell.eligible,
+            subscores: cell.subscores,
+          }))
+      : studyArea
+        ? []
+        : visibleCells;
+    for (const cell of cellsToRank) {
       const score = compositeScore(cell.subscores, weights);
       if (score != null) {
         scored.push({ h3Index: cell.h3Index, score, eligible: cell.eligible });
@@ -438,7 +496,7 @@ export default function MapCanvas() {
     }
     scored.sort((a, b) => b.score - a.score);
     return scored.slice(0, RANKED_LIMIT);
-  }, [visibleCells, weights]);
+  }, [visibleCells, weights, studyArea, studyAreaQuery.data, eligibleOnly]);
 
   useEffect(() => {
     setRankedCells(rankedCells.length > 0 ? rankedCells : null);

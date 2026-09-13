@@ -2,9 +2,12 @@ import { ChevronLeftIcon, ChevronRightIcon, CircleAlertIcon } from "lucide-react
 import { useEffect, useState } from "react";
 
 import { SCORE_BINS, binIndexIn } from "@/lib/heatmap-palette";
+import { compositeScore } from "@/lib/cells";
+import { describeStudyArea } from "@/lib/study-area";
 import { useMapStore } from "@/stores/map-store";
 
 import { text } from "./panel-styles";
+import SiteExportActions from "./site-export-actions";
 
 /**
  * How many rows are on screen at once.
@@ -40,6 +43,11 @@ export default function RankedList() {
   const setEligibleOnly = useMapStore((s) => s.setEligibleOnly);
   const stats = useMapStore((s) => s.heatmapStats);
   const preset = useMapStore((s) => s.preset);
+  const presets = useMapStore((s) => s.presets);
+  const customWeights = useMapStore((s) => s.customWeights);
+  const studyArea = useMapStore((s) => s.studyArea);
+  const studyAreaSites = useMapStore((s) => s.studyAreaSites);
+  const studyAreaScoreStatus = useMapStore((s) => s.studyAreaScoreStatus);
 
   const [page, setPage] = useState(0);
 
@@ -58,6 +66,19 @@ export default function RankedList() {
   const rows = ranked?.slice(start, start + PAGE_SIZE) ?? [];
 
   const selectedH3 = selection?.cell?.h3_index ?? null;
+  const weights = customWeights ?? presets?.[preset] ?? {};
+  const areaSitesByH3 = new Map(
+    (studyAreaSites ?? []).map((site) => [site.h3_index, site]),
+  );
+  const areaExportSites = (ranked ?? [])
+    .slice(0, 4)
+    .map((cell) => areaSitesByH3.get(cell.h3Index))
+    .filter((site): site is NonNullable<typeof site> => site !== undefined)
+    .sort(
+      (a, b) =>
+        (compositeScore(b.subscores, weights) ?? -1) -
+        (compositeScore(a.subscores, weights) ?? -1),
+    );
 
   const filter = (
     /* The eligibility filter, on the list it filters. It used to be a
@@ -76,10 +97,41 @@ export default function RankedList() {
     </div>
   );
 
+  const areaExport = studyArea ? (
+    <div className="flex items-center gap-2 border-b border-border px-3 py-1.5">
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-[10px] font-medium text-foreground">
+          {describeStudyArea(studyArea)}
+        </p>
+        <p className={text.hint}>
+          {studyAreaScoreStatus.pending
+            ? "Fetching full subscores and rules..."
+            : studyAreaScoreStatus.error
+              ? studyAreaScoreStatus.error
+              : `${studyAreaSites?.length ?? 0} cells batch scored`}
+        </p>
+      </div>
+      {areaExportSites.length > 0 ? (
+        <SiteExportActions
+          preset={preset}
+          sites={areaExportSites}
+          scope={{
+            label: describeStudyArea(studyArea),
+            cellCount: studyAreaSites?.length ?? 0,
+            area: studyArea,
+          }}
+          variant="toolbar"
+          weights={weights}
+        />
+      ) : null}
+    </div>
+  ) : null;
+
   if (ranked === null) {
     return (
       <div>
         {filter}
+        {areaExport}
         <p className={`p-4 ${text.hint}`}>
         {eligibleOnly
           ? "Nowhere clears every rule for this use case. Untick “Only workable sites” to see the rest."
@@ -92,6 +144,7 @@ export default function RankedList() {
   return (
     <div>
       {filter}
+      {areaExport}
       <ol className="flex flex-col p-2">
         {rows.map((cell, index) => {
           // Always the score ramp, even when the map is painted by air

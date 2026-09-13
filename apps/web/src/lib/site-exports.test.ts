@@ -61,6 +61,33 @@ describe("buildSitesGeoJson", () => {
     assert.deepEqual(result.features.map((feature) => feature.properties.site), ["Site 1", "Site 2"]);
     assert.deepEqual(result.features[1].properties.failed_rules, []);
   });
+
+  test("includes the drawn study area and selected-cell count", () => {
+    const result = buildSitesGeoJson({
+      sites: [site],
+      preset: "retail",
+      weights: { demographics: 1 },
+      scope: {
+        label: "a 4-corner shape",
+        cellCount: 18,
+        area: {
+          kind: "polygon",
+          ring: [
+            [-97.8, 30.2],
+            [-97.7, 30.2],
+            [-97.7, 30.3],
+            [-97.8, 30.3],
+          ],
+        },
+      },
+    });
+
+    assert.equal(result.study_area?.selected_cell_count, 18);
+    assert.deepEqual(
+      result.study_area?.geometry.coordinates[0][0],
+      result.study_area?.geometry.coordinates[0].at(-1),
+    );
+  });
 });
 
 describe("createSitesPdf", () => {

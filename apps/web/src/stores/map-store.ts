@@ -255,6 +255,9 @@ interface MapStore {
   selectionOrigin: "map" | "list" | null;
   /** Raw score responses kept for live, weight-adjusted side-by-side comparison. */
   comparisonSites: ScoredCell[];
+  /** Full `/score/batch` results for the active drawn area, including constraints. */
+  studyAreaSites: ScoredCell[] | null;
+  studyAreaScoreStatus: { pending: boolean; error: string | null };
   /**
    * Whether the reach bands are drawn and their numbers fetched.
    *
@@ -321,6 +324,10 @@ interface MapStore {
   toggleComparisonSite: (cell: ScoredCell) => void;
   removeComparisonSite: (h3Index: string) => void;
   clearComparisonSites: () => void;
+  setStudyAreaScores: (
+    sites: ScoredCell[] | null,
+    status: { pending: boolean; error: string | null },
+  ) => void;
   setCatchmentOn: (on: boolean) => void;
   setCatchmentMode: (mode: ReachabilityMode) => void;
   setCatchmentMinutes: (minutes: number) => void;
@@ -347,6 +354,8 @@ export const useMapStore = create<MapStore>((set) => ({
   pendingFocusH3: null,
   selectionOrigin: null,
   comparisonSites: [],
+  studyAreaSites: null,
+  studyAreaScoreStatus: { pending: false, error: null },
   catchmentOn: false,
   catchmentMode: "car",
   catchmentMinutes: 20,
@@ -382,6 +391,8 @@ export const useMapStore = create<MapStore>((set) => ({
       selection: null,
       selectionOrigin: null,
       comparisonSites: [],
+      studyAreaSites: null,
+      studyAreaScoreStatus: { pending: false, error: null },
     }),
   setEligibleOnly: (eligibleOnly) => set({ eligibleOnly }),
   setWeight: (key, value, base) =>
@@ -402,6 +413,8 @@ export const useMapStore = create<MapStore>((set) => ({
       ),
     })),
   clearComparisonSites: () => set({ comparisonSites: [] }),
+  setStudyAreaScores: (studyAreaSites, studyAreaScoreStatus) =>
+    set({ studyAreaSites, studyAreaScoreStatus }),
   setCatchmentOn: (catchmentOn) => set({ catchmentOn }),
   setCatchmentMode: (catchmentMode) =>
     set({ catchmentMode, catchmentMinutes: 20 }),
@@ -415,10 +428,25 @@ export const useMapStore = create<MapStore>((set) => ({
   // Arming a tool drops the previous shape rather than leaving it on screen
   // to be replaced: two boundaries on the map, one of which is about to be
   // discarded, cannot be told apart while the second is half drawn.
-  setDrawMode: (drawMode) => set({ drawMode, studyArea: null }),
+  setDrawMode: (drawMode) =>
+    set({
+      drawMode,
+      studyArea: null,
+      studyAreaSites: null,
+      studyAreaScoreStatus: { pending: false, error: null },
+    }),
   // Disarms the tool in the same update that commits the shape, so the canvas
   // cannot land a finished area and still be collecting vertices for it.
-  setStudyArea: (studyArea) => set({ studyArea, drawMode: null }),
+  setStudyArea: (studyArea) =>
+    set({
+      studyArea,
+      drawMode: null,
+      studyAreaSites: null,
+      studyAreaScoreStatus: {
+        pending: studyArea !== null,
+        error: null,
+      },
+    }),
   focusCell: (pendingFocusH3) => set({ pendingFocusH3, selectionOrigin: "list" }),
   setSelectionOrigin: (selectionOrigin) => set({ selectionOrigin }),
   clearPendingFocus: () => set({ pendingFocusH3: null }),

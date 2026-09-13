@@ -9,6 +9,7 @@ import {
   type Subscores,
   type Weights,
 } from "./cells";
+import { studyAreaRing, type StudyArea } from "./study-area";
 
 export interface ExportConstraint {
   id: string;
@@ -31,6 +32,11 @@ export interface SiteExportInput {
   sites: readonly ExportSite[];
   preset: PresetName;
   weights: Weights;
+  scope?: {
+    label: string;
+    cellCount: number;
+    area: StudyArea;
+  };
 }
 
 function scoreOf(site: ExportSite, weights: Weights): number | null {
@@ -48,11 +54,25 @@ function closedBoundary(h3Index: string): [number, number][] {
 }
 
 /** A portable GIS artifact: one polygon feature per selected H3 cell. */
-export function buildSitesGeoJson({ sites, preset, weights }: SiteExportInput) {
+export function buildSitesGeoJson(input: SiteExportInput) {
+  const { sites, preset, weights } = input;
+  const areaRing = input.scope ? studyAreaRing(input.scope.area) : null;
   return {
     type: "FeatureCollection" as const,
     name: `Wherehouse ${PRESET_LABELS[preset]} site comparison`,
     generated_at: new Date().toISOString(),
+    ...(input.scope
+      ? {
+          study_area: {
+            label: input.scope.label,
+            selected_cell_count: input.scope.cellCount,
+            geometry: {
+              type: "Polygon" as const,
+              coordinates: [areaRing?.[0] ? [...areaRing, areaRing[0]] : []],
+            },
+          },
+        }
+      : {}),
     features: sites.map((site, index) => ({
       type: "Feature" as const,
       id: site.h3_index,
@@ -92,16 +112,20 @@ function downloadBlob(blob: Blob, filename: string) {
   URL.revokeObjectURL(url);
 }
 
-function exportStem(preset: PresetName, count: number) {
-  const kind = count === 1 ? "site" : `comparison-${count}-sites`;
-  return `wherehouse-${preset}-${kind}`;
+function exportStem(input: SiteExportInput) {
+  const kind = input.scope
+    ? `drawn-area-top-${input.sites.length}`
+    : input.sites.length === 1
+      ? "site"
+      : `comparison-${input.sites.length}-sites`;
+  return `wherehouse-${input.preset}-${kind}`;
 }
 
 export function downloadSitesGeoJson(input: SiteExportInput) {
   const contents = JSON.stringify(buildSitesGeoJson(input), null, 2);
   downloadBlob(
     new Blob([contents], { type: "application/geo+json;charset=utf-8" }),
-    `${exportStem(input.preset, input.sites.length)}.geojson`,
+    `${exportStem(input)}.geojson`,
   );
 }
 
@@ -151,7 +175,8 @@ export async function createSitesPdf(input: SiteExportInput) {
 
   const reportHeader = (subtitle: string) => {
     doc.setFillColor(8, 8, 8);
-    doc.rect(0, 0, pageWidth, 27, "F");
+    doc.setDrawColor(8, 8, 8);
+    doc.rect(0, 0, pageWidth, 27, "FD");
     doc.setTextColor(255, 255, 255);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(14);
@@ -161,7 +186,9 @@ export async function createSitesPdf(input: SiteExportInput) {
     doc.setTextColor(178, 178, 178);
     doc.text(subtitle, margin, 19);
     doc.text(new Date().toLocaleString(), pageWidth - margin, 12, { align: "right" });
-    doc.text(`${PRESET_LABELS[input.preset]} / H3 resolution 8`, pageWidth - margin, 19, {
+    doc.text(input.scope
+      ? `${input.scope.label} / ${input.scope.cellCount} scored cells`
+      : `${PRESET_LABELS[input.preset]} / H3 resolution 8`, pageWidth - margin, 19, {
       align: "right",
     });
   };
@@ -173,6 +200,31 @@ export async function createSitesPdf(input: SiteExportInput) {
       const color = siteColors[colorIndex] ?? siteColors[0];
       doc.setFillColor(color[0], color[1], color[2]);
       doc.roundedRect(x, y, width * Math.max(0, Math.min(100, score)) / 100, 2.2, 1.1, 1.1, "F");
+    }
+  };
+
+  const drawScopeGlyph = (x: number, y: number, width: number, height: number) => {
+    if (!input.scope) return;
+    const ring = studyAreaRing(input.scope.area);
+    if (ring.length < 3) return;
+    const lngs = ring.map(([lng]) => lng);
+    const lats = ring.map(([, lat]) => lat);
+    const minLng = Math.min(...lngs);
+    const maxLng = Math.max(...lngs);
+    const minLat = Math.min(...lats);
+    const maxLat = Math.max(...lats);
+    const lngSpan = maxLng - minLng || 1;
+    const latSpan = maxLat - minLat || 1;
+    const points = ring.map(([lng, lat]) => [
+      x + ((lng - minLng) / lngSpan) * width,
+      y + height - ((lat - minLat) / latSpan) * height,
+    ] as const);
+    doc.setDrawColor(77, 185, 198);
+    doc.setLineWidth(0.7);
+    for (let index = 0; index < points.length; index += 1) {
+      const from = points[index];
+      const to = points[(index + 1) % points.length];
+      doc.line(from[0], from[1], to[0], to[1]);
     }
   };
 
@@ -194,13 +246,16 @@ export async function createSitesPdf(input: SiteExportInput) {
   doc.setTextColor(100, 100, 100);
   doc.text(
     anyEligible
-      ? "Highest scoring site that clears every hard rule."
+      ? input.scope
+        ? `Best workable option among ${input.scope.cellCount} cells scored inside the drawn area.`
+        : "Highest scoring site that clears every hard rule."
       : input.sites.length === 1
         ? "This site does not clear every hard rule. Resolve failed rules before selecting it."
         : "No compared site clears every hard rule. Resolve failed rules before selecting a site.",
     margin + 38,
     y + 16,
   );
+  drawScopeGlyph(pageWidth - margin - 42, y + 5, 20, 14);
 
   y = 67;
   sectionLabel("Site overview", y);
@@ -353,5 +408,5 @@ export async function createSitesPdf(input: SiteExportInput) {
 
 export async function downloadSitesPdf(input: SiteExportInput) {
   const doc = await createSitesPdf(input);
-  doc.save(`${exportStem(input.preset, input.sites.length)}.pdf`);
+  doc.save(`${exportStem(input)}.pdf`);
 }
