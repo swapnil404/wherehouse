@@ -43,6 +43,7 @@ import { useTRPC } from "@/utils/trpc";
 
 import { text } from "./panel-styles";
 import SectionLabel from "./section-label";
+import SiteExportActions from "./site-export-actions";
 
 /**
  * Floating score panel.
@@ -58,6 +59,8 @@ import SectionLabel from "./section-label";
 
 interface ScoreData {
   h3_index: string;
+  lat: number;
+  lon: number;
   score: number | null;
   eligible: boolean;
   subscores: Subscores;
@@ -332,6 +335,7 @@ export default function ScorePanel({
     : 0;
   const narrative = waterfall && analytics ? buildNarrative(waterfall, analytics) : null;
   const failedRuleCount = data?.constraints.filter((constraint) => !constraint.pass).length ?? 0;
+  const preset = useMapStore((state) => state.preset);
 
   // No positioning or elevation here any more. This is the body of the
   // results dock's "This site" tab, so the dock owns width, scrolling and
@@ -423,6 +427,12 @@ export default function ScorePanel({
                 ? "Compare tray full"
                 : "Add to compare"}
           </button>
+
+          <SiteExportActions
+            preset={preset}
+            sites={[data]}
+            weights={weights ?? {}}
+          />
 
           {waterfall ? (
             <div className="mt-4">

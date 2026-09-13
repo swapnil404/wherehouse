@@ -433,6 +433,6 @@ Every line in the brief maps to a deliverable and an owner. Nothing is unassigne
 - [ ] Hot-spots, cold-spots and underserved areas render
 - [ ] Polygon draw → batch score → ranked results
 - [x] Isochrones + catchment population for car and walk
-- [ ] Compare tray with ≥3 sites, PDF and GeoJSON export
+- [x] Compare tray with ≥3 sites, PDF and GeoJSON export
 - [ ] README + model card + data licenses committed
 - [ ] Demo rehearsed cold, twice, end to end

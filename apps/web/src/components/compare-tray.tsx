@@ -16,6 +16,7 @@ import { COMPARE_COLORS, MAX_COMPARE_SITES } from "@/lib/compare";
 import { useMapStore } from "@/stores/map-store";
 
 import { panelSurface } from "./panel-styles";
+import SiteExportActions from "./site-export-actions";
 
 const RADAR_CENTER = 64;
 const RADAR_RADIUS = 48;
@@ -93,6 +94,13 @@ export default function CompareTray() {
             <ChevronUpIcon className="ml-auto size-3.5 shrink-0 text-muted-foreground" />
           )}
         </button>
+
+        <SiteExportActions
+          preset={preset}
+          sites={sites}
+          variant="toolbar"
+          weights={weights}
+        />
 
         <button
           aria-label="Clear comparison"
