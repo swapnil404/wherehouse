@@ -1,20 +1,16 @@
-import { cellToLatLng } from "h3-js";
+import { cellToBoundary } from "h3-js";
 
 /**
  * User-drawn study areas.
  *
  * A study area is *the reader's own geometry*, not data we loaded, and that
  * distinction drives every decision in this file. It is drawn in its own hue
- * rather than borrowing the score ramp's, it is tested against cell centroids
- * rather than cell boundaries, and it filters the grid the client already
- * holds instead of asking the server to re-cut it.
+ * rather than borrowing the score ramp's, and it filters the grid the client
+ * already holds instead of asking the server to re-cut it.
  *
- * Centroid containment is the honest test. Scoring already snaps a clicked
- * point to its containing cell (§7), so a cell is either in the reader's area
- * or it is not; splitting hexes on the boundary would imply a precision the
- * res-8 grid does not have. The worst case is a cell whose centre falls just
- * outside a line drawn through it, which is about 460 m of ambiguity — the
- * same figure the catchment copy already owns up to.
+ * A cell belongs to an area when its hexagon intersects the reader's shape.
+ * Centre-only containment made narrow or edge-following drawings silently
+ * omit visibly touched cells, which made the result feel arbitrary.
  */
 
 /** `[lng, lat]` — the order deck.gl, MapLibre and GeoJSON all agree on. */
@@ -79,6 +75,61 @@ function pointInRing(point: Position, ring: readonly Position[]): boolean {
   return inside;
 }
 
+function orientation(a: Position, b: Position, c: Position): number {
+  return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+}
+
+function onSegment(a: Position, b: Position, point: Position): boolean {
+  const epsilon = 1e-10;
+  return (
+    Math.abs(orientation(a, b, point)) <= epsilon &&
+    point[0] >= Math.min(a[0], b[0]) - epsilon &&
+    point[0] <= Math.max(a[0], b[0]) + epsilon &&
+    point[1] >= Math.min(a[1], b[1]) - epsilon &&
+    point[1] <= Math.max(a[1], b[1]) + epsilon
+  );
+}
+
+function segmentsIntersect(
+  a: Position,
+  b: Position,
+  c: Position,
+  d: Position,
+): boolean {
+  const abC = orientation(a, b, c);
+  const abD = orientation(a, b, d);
+  const cdA = orientation(c, d, a);
+  const cdB = orientation(c, d, b);
+  if ((abC > 0) !== (abD > 0) && (cdA > 0) !== (cdB > 0)) return true;
+  return (
+    onSegment(a, b, c) ||
+    onSegment(a, b, d) ||
+    onSegment(c, d, a) ||
+    onSegment(c, d, b)
+  );
+}
+
+function ringsIntersect(a: readonly Position[], b: readonly Position[]): boolean {
+  if (a.length < 3 || b.length < 3) return false;
+  if (a.some((point) => pointInRing(point, b))) return true;
+  if (b.some((point) => pointInRing(point, a))) return true;
+  for (let ai = 0; ai < a.length; ai += 1) {
+    for (let bi = 0; bi < b.length; bi += 1) {
+      if (
+        segmentsIntersect(
+          a[ai],
+          a[(ai + 1) % a.length],
+          b[bi],
+          b[(bi + 1) % b.length],
+        )
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 const CIRCLE_SEGMENTS = 72;
 
 /**
@@ -115,7 +166,7 @@ export function studyAreaContains(area: StudyArea, position: Position): boolean 
 }
 
 /**
- * Narrow a set of cells to those whose centroid falls inside the area.
+ * Narrow a set of cells to those whose hexagon touches or overlaps the area.
  *
  * Generic over anything carrying an `h3Index`, so the heatmap cells, the
  * hotspot classifications and the underserved cells can all be cut by the
@@ -126,9 +177,10 @@ export function cellsInStudyArea<T extends { h3Index: string }>(
   area: StudyArea | null,
 ): T[] {
   if (!area) return cells;
+  const areaBoundary = studyAreaRing(area);
   return cells.filter((cell) => {
-    const [lat, lng] = cellToLatLng(cell.h3Index);
-    return studyAreaContains(area, [lng, lat]);
+    const boundary = cellToBoundary(cell.h3Index, true) as Position[];
+    return ringsIntersect(boundary, areaBoundary);
   });
 }
 

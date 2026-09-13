@@ -35,6 +35,9 @@ export interface SiteExportInput {
   scope?: {
     label: string;
     cellCount: number;
+    eligibleCount?: number;
+    averageScore?: number | null;
+    mainBlocker?: string | null;
     area: StudyArea;
   };
 }
@@ -66,6 +69,9 @@ export function buildSitesGeoJson(input: SiteExportInput) {
           study_area: {
             label: input.scope.label,
             selected_cell_count: input.scope.cellCount,
+            eligible_cell_count: input.scope.eligibleCount,
+            average_score: input.scope.averageScore,
+            main_blocker: input.scope.mainBlocker,
             geometry: {
               type: "Polygon" as const,
               coordinates: [areaRing?.[0] ? [...areaRing, areaRing[0]] : []],
@@ -145,7 +151,7 @@ function printable(value: unknown): string {
 export async function createSitesPdf(input: SiteExportInput) {
   const { jsPDF } = await import("jspdf");
   const doc = new jsPDF({
-    orientation: input.sites.length === 1 ? "portrait" : "landscape",
+    orientation: input.scope || input.sites.length > 1 ? "landscape" : "portrait",
     unit: "mm",
     format: "a4",
   });
@@ -228,7 +234,7 @@ export async function createSitesPdf(input: SiteExportInput) {
     }
   };
 
-  reportHeader(input.sites.length === 1 ? "SITE ASSESSMENT" : "SITE COMPARISON");
+  reportHeader(input.scope ? "DRAWN AREA / TOP CANDIDATES" : input.sites.length === 1 ? "SITE ASSESSMENT" : "SITE COMPARISON");
 
   let y = 35;
   doc.setFillColor(anyEligible ? 244 : 255, anyEligible ? 244 : 238, anyEligible ? 244 : 240);
@@ -249,6 +255,8 @@ export async function createSitesPdf(input: SiteExportInput) {
       ? input.scope
         ? `Best workable option among ${input.scope.cellCount} cells scored inside the drawn area.`
         : "Highest scoring site that clears every hard rule."
+      : input.scope
+        ? `Highest scoring candidate among ${input.scope.cellCount} cells; every candidate shown needs rule review.`
       : input.sites.length === 1
         ? "This site does not clear every hard rule. Resolve failed rules before selecting it."
         : "No compared site clears every hard rule. Resolve failed rules before selecting a site.",
@@ -258,6 +266,28 @@ export async function createSitesPdf(input: SiteExportInput) {
   drawScopeGlyph(pageWidth - margin - 42, y + 5, 20, 14);
 
   y = 67;
+  if (input.scope) {
+    const summary = [
+      ["CELLS ANALYZED", String(input.scope.cellCount)],
+      ["WORKABLE", String(input.scope.eligibleCount ?? 0)],
+      ["AVERAGE SCORE", input.scope.averageScore?.toFixed(1) ?? "-"],
+      ["MAIN BLOCKER", input.scope.mainBlocker ?? "None"],
+    ] as const;
+    const summaryWidth = contentWidth / summary.length;
+    summary.forEach(([label, value], index) => {
+      const x = margin + summaryWidth * index;
+      doc.setFillColor(248, 248, 248);
+      doc.rect(x, y, summaryWidth - 1, 17, "F");
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(6.5);
+      doc.setTextColor(120, 120, 120);
+      doc.text(label, x + 4, y + 6);
+      doc.setFontSize(index === 3 ? 8 : 12);
+      doc.setTextColor(25, 25, 25);
+      doc.text(doc.splitTextToSize(value, summaryWidth - 8).slice(0, 1), x + 4, y + 13);
+    });
+    y += 25;
+  }
   sectionLabel("Site overview", y);
   y += 4;
   const cardGap = 3;

@@ -38,7 +38,9 @@ export default function SiteExportActions({
         className={base}
         onClick={() => {
           downloadSitesGeoJson(input);
-          toast.success(`Exported ${sites.length === 1 ? "site" : `${sites.length} sites`} as GeoJSON`);
+          toast.success(
+            `Exported ${scope ? "drawn area" : sites.length === 1 ? "site" : `${sites.length} sites`} as GeoJSON`,
+          );
         }}
         type="button"
       >
@@ -52,7 +54,9 @@ export default function SiteExportActions({
           setPdfPending(true);
           try {
             await downloadSitesPdf(input);
-            toast.success(`Exported ${sites.length === 1 ? "site report" : "comparison report"} as PDF`);
+            toast.success(
+              `Exported ${scope ? "drawn-area report" : sites.length === 1 ? "site report" : "comparison report"} as PDF`,
+            );
           } catch (error) {
             toast.error(error instanceof Error ? error.message : "PDF export failed");
           } finally {

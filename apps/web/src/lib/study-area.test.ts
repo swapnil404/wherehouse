@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { latLngToCell } from "h3-js";
+import { cellToBoundary, latLngToCell } from "h3-js";
 
 import {
   DOUBLE_CLICK_SLOP_PX,
@@ -77,11 +77,26 @@ describe("cellsInStudyArea", () => {
     assert.equal(cellsInStudyArea(cells, null), cells);
   });
 
-  test("keeps only the cells whose centroid falls inside", () => {
+  test("keeps only the cells whose hexagon intersects the area", () => {
     const kept = cellsInStudyArea([near, far], {
       kind: "radius",
       center: AUSTIN,
       radiusMeters: 3000,
+    });
+    assert.deepEqual(kept, [near]);
+  });
+
+  test("keeps a touched cell even when its centroid is outside", () => {
+    const [lng, lat] = cellToBoundary(near.h3Index, true)[0];
+    const epsilon = 0.00005;
+    const kept = cellsInStudyArea([near, far], {
+      kind: "polygon",
+      ring: [
+        [lng - epsilon, lat - epsilon],
+        [lng + epsilon, lat - epsilon],
+        [lng + epsilon, lat + epsilon],
+        [lng - epsilon, lat + epsilon],
+      ],
     });
     assert.deepEqual(kept, [near]);
   });

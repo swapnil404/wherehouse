@@ -70,6 +70,9 @@ describe("buildSitesGeoJson", () => {
       scope: {
         label: "a 4-corner shape",
         cellCount: 18,
+        eligibleCount: 7,
+        averageScore: 64.2,
+        mainBlocker: "Outside floodplain (8)",
         area: {
           kind: "polygon",
           ring: [
@@ -83,6 +86,8 @@ describe("buildSitesGeoJson", () => {
     });
 
     assert.equal(result.study_area?.selected_cell_count, 18);
+    assert.equal(result.study_area?.eligible_cell_count, 7);
+    assert.equal(result.study_area?.average_score, 64.2);
     assert.deepEqual(
       result.study_area?.geometry.coordinates[0][0],
       result.study_area?.geometry.coordinates[0].at(-1),
@@ -102,5 +107,30 @@ describe("createSitesPdf", () => {
     assert.equal(new TextDecoder().decode(bytes.slice(0, 4)), "%PDF");
     assert.equal(doc.getNumberOfPages(), 1);
     assert.ok(bytes.byteLength > 2_000);
+  });
+
+  test("creates an area report in landscape even with one exported candidate", async () => {
+    const doc = await createSitesPdf({
+      sites: [site],
+      preset: "warehouse",
+      weights: { zoning: 1 },
+      scope: {
+        label: "a 5-corner shape",
+        cellCount: 17,
+        eligibleCount: 0,
+        averageScore: 28.4,
+        mainBlocker: "Outside floodplain (17)",
+        area: {
+          kind: "polygon",
+          ring: [
+            [-97.8, 30.2],
+            [-97.7, 30.2],
+            [-97.7, 30.3],
+            [-97.8, 30.3],
+          ],
+        },
+      },
+    });
+    assert.ok(doc.internal.pageSize.getWidth() > doc.internal.pageSize.getHeight());
   });
 });

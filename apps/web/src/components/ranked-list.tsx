@@ -67,18 +67,30 @@ export default function RankedList() {
 
   const selectedH3 = selection?.cell?.h3_index ?? null;
   const weights = customWeights ?? presets?.[preset] ?? {};
-  const areaSitesByH3 = new Map(
-    (studyAreaSites ?? []).map((site) => [site.h3_index, site]),
-  );
-  const areaExportSites = (ranked ?? [])
-    .slice(0, 4)
-    .map((cell) => areaSitesByH3.get(cell.h3Index))
-    .filter((site): site is NonNullable<typeof site> => site !== undefined)
-    .sort(
-      (a, b) =>
-        (compositeScore(b.subscores, weights) ?? -1) -
-        (compositeScore(a.subscores, weights) ?? -1),
-    );
+  const scoredAreaSites = (studyAreaSites ?? [])
+    .map((site) => ({ site, score: compositeScore(site.subscores, weights) }))
+    .filter((entry): entry is typeof entry & { score: number } => entry.score !== null)
+    .sort((a, b) => b.score - a.score);
+  // Area reports describe the area, not the current shortlist view. In
+  // particular, switching to Workable must not turn a 17-cell report into a
+  // one-site export merely because most candidates fail a hard rule.
+  const areaExportSites = scoredAreaSites.slice(0, 4).map(({ site }) => site);
+  const eligibleAreaCount = (studyAreaSites ?? []).filter(
+    (site) => site.eligible,
+  ).length;
+  const averageAreaScore =
+    scoredAreaSites.length > 0
+      ? scoredAreaSites.reduce((sum, entry) => sum + entry.score, 0) /
+        scoredAreaSites.length
+      : null;
+  const blockerCounts = new Map<string, number>();
+  for (const { site } of scoredAreaSites) {
+    for (const constraint of site.constraints.filter((item) => !item.pass)) {
+      const label = constraint.label || constraint.id;
+      blockerCounts.set(label, (blockerCounts.get(label) ?? 0) + 1);
+    }
+  }
+  const mainBlocker = [...blockerCounts.entries()].sort((a, b) => b[1] - a[1])[0];
 
   const filter = (
     /* The eligibility filter, on the list it filters. It used to be a
@@ -88,41 +100,64 @@ export default function RankedList() {
     <div className="flex items-center gap-1 border-b border-border p-1.5">
       <FilterButton active={!eligibleOnly} onClick={() => setEligibleOnly(false)}>
         Everywhere
-        <Count>{stats?.total}</Count>
+        <Count>{studyArea ? studyAreaSites?.length : stats?.total}</Count>
       </FilterButton>
       <FilterButton active={eligibleOnly} onClick={() => setEligibleOnly(true)}>
         Workable
-        <Count>{stats?.eligible}</Count>
+        <Count>{studyArea ? eligibleAreaCount : stats?.eligible}</Count>
       </FilterButton>
     </div>
   );
 
   const areaExport = studyArea ? (
-    <div className="flex items-center gap-2 border-b border-border px-3 py-1.5">
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-[10px] font-medium text-foreground">
-          {describeStudyArea(studyArea)}
-        </p>
-        <p className={text.hint}>
-          {studyAreaScoreStatus.pending
-            ? "Fetching full subscores and rules..."
-            : studyAreaScoreStatus.error
-              ? studyAreaScoreStatus.error
-              : `${studyAreaSites?.length ?? 0} cells batch scored`}
-        </p>
+    <div className="border-b border-border px-3 py-2">
+      <div className="flex items-center gap-2">
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-[10px] font-medium text-foreground">
+            {describeStudyArea(studyArea)}
+          </p>
+          <p className={text.hint}>
+            {studyAreaScoreStatus.pending
+              ? "Fetching full subscores and rules..."
+              : studyAreaScoreStatus.error
+                ? studyAreaScoreStatus.error
+                : `${studyAreaSites?.length ?? 0} cells batch scored`}
+          </p>
+        </div>
+        {areaExportSites.length > 0 ? (
+          <SiteExportActions
+            preset={preset}
+            sites={areaExportSites}
+            scope={{
+              label: describeStudyArea(studyArea),
+              cellCount: studyAreaSites?.length ?? 0,
+              eligibleCount: eligibleAreaCount,
+              averageScore: averageAreaScore,
+              mainBlocker: mainBlocker
+                ? `${mainBlocker[0]} (${mainBlocker[1]})`
+                : null,
+              area: studyArea,
+            }}
+            variant="toolbar"
+            weights={weights}
+          />
+        ) : null}
       </div>
-      {areaExportSites.length > 0 ? (
-        <SiteExportActions
-          preset={preset}
-          sites={areaExportSites}
-          scope={{
-            label: describeStudyArea(studyArea),
-            cellCount: studyAreaSites?.length ?? 0,
-            area: studyArea,
-          }}
-          variant="toolbar"
-          weights={weights}
-        />
+      {!studyAreaScoreStatus.pending &&
+      !studyAreaScoreStatus.error &&
+      scoredAreaSites.length > 0 ? (
+        <>
+          <div className="mt-2 grid grid-cols-3 gap-px overflow-hidden rounded-md bg-border">
+            <AreaMetric label="Best" value={scoredAreaSites[0].score.toFixed(1)} />
+            <AreaMetric label="Average" value={averageAreaScore?.toFixed(1) ?? "-"} />
+            <AreaMetric label="Workable" value={`${eligibleAreaCount}/${scoredAreaSites.length}`} />
+          </div>
+          <p className="mt-1.5 truncate text-[9px] text-muted-foreground">
+            {mainBlocker
+              ? `Main blocker · ${mainBlocker[0]} · ${mainBlocker[1]} cells`
+              : "No shared rule failures"}
+          </p>
+        </>
       ) : null}
     </div>
   ) : null;
@@ -211,6 +246,17 @@ export default function RankedList() {
           onNext={() => setPage(current + 1)}
         />
       ) : null}
+    </div>
+  );
+}
+
+function AreaMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="bg-background/90 px-2 py-1.5">
+      <p className="text-[9px] uppercase tracking-[0.12em] text-muted-foreground">
+        {label}
+      </p>
+      <p className="font-mono text-[12px] tabular-nums text-foreground">{value}</p>
     </div>
   );
 }
