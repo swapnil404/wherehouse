@@ -26,19 +26,28 @@ import { text } from "./panel-styles";
  * them.
  */
 export default function SavedSites() {
-  const {
-    active,
-    projects,
-    updateProject,
-    deleteProject,
-    updateSite,
-    deleteSite,
-  } = useProjects();
+  const { active, projects, updateProject, updateSite, deleteSite } = useProjects();
   const preset = useMapStore((state) => state.preset);
   const presets = useMapStore((state) => state.presets);
   const customWeights = useMapStore((state) => state.customWeights);
   const focusCell = useMapStore((state) => state.focusCell);
   const [expanded, setExpanded] = useState<string | null>(null);
+  /**
+   * Note text the reader has typed but not committed, kept here rather than in
+   * the row because the row's notes field unmounts every time it collapses.
+   *
+   * An uncontrolled field seeded from `site.notes` looked fine and was quietly
+   * destructive. Collapsing saved on blur, reopening re-seeded the field from
+   * whatever the cache held at that instant — often the pre-save value — and
+   * the next blur committed *that* back over the note that had just been
+   * written. A note could be typed, saved, and erased by its own field without
+   * the reader touching the text again.
+   *
+   * Keyed by site id and never cleared: what the reader typed is the truth
+   * until they change it, so it outlives the collapse, the refetch and the
+   * reorder that follows a save.
+   */
+  const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
 
   if (!active) {
     return (
@@ -55,6 +64,16 @@ export default function SavedSites() {
 
   const weights = customWeights ?? presets?.[preset] ?? {};
   const full = active.savedSites.length >= MAX_SAVED_SITES;
+
+  const commitNote = (site: SavedSite) => {
+    const draft = noteDrafts[site.id];
+    // Untouched fields commit nothing. This is what stops a field that merely
+    // gained and lost focus from writing anything at all.
+    if (draft === undefined) return;
+    const notes = draft.trim();
+    if (notes === (site.notes ?? "")) return;
+    updateSite.mutate({ siteId: site.id, notes });
+  };
 
   return (
     <div className="flex flex-col">
@@ -80,17 +99,12 @@ export default function SavedSites() {
             }
           }}
         />
+        {/* Deleting a project lives in the header switcher, which confirms
+            first. A one-click trash icon here removed the project and cascaded
+            through every site in it with nothing to stop a misclick. */}
         <span className={`shrink-0 font-mono ${text.numeric}`}>
           {active.savedSites.length}/{MAX_SAVED_SITES}
         </span>
-        <button
-          aria-label="Delete project"
-          className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-          onClick={() => deleteProject.mutate({ projectId: active.id })}
-          type="button"
-        >
-          <TrashIcon className="size-3.5" />
-        </button>
       </div>
 
       <p className={`border-b border-border px-3 py-2 ${text.hint}`}>
@@ -113,7 +127,11 @@ export default function SavedSites() {
               onFocus={() => {
                 if (site.h3Cell) focusCell(site.h3Cell);
               }}
-              onNotes={(notes) => updateSite.mutate({ siteId: site.id, notes })}
+              note={noteDrafts[site.id] ?? site.notes ?? ""}
+              onNoteChange={(value) =>
+                setNoteDrafts((drafts) => ({ ...drafts, [site.id]: value }))
+              }
+              onNoteCommit={() => commitNote(site)}
               onRename={(name) => updateSite.mutate({ siteId: site.id, name })}
               onToggle={() =>
                 setExpanded((open) => (open === site.id ? null : site.id))
@@ -134,20 +152,24 @@ function SavedSiteRow({
   preset,
   weights,
   expanded,
+  note,
   onToggle,
   onFocus,
   onRename,
-  onNotes,
+  onNoteChange,
+  onNoteCommit,
   onDelete,
 }: {
   site: SavedSite;
   preset: PresetName;
   weights: Weights;
   expanded: boolean;
+  note: string;
   onToggle: () => void;
   onFocus: () => void;
   onRename: (name: string) => void;
-  onNotes: (notes: string) => void;
+  onNoteChange: (value: string) => void;
+  onNoteCommit: () => void;
   onDelete: () => void;
 }) {
   const snapshot = parseSnapshot(site.scoreSnapshot);
@@ -223,15 +245,15 @@ function SavedSiteRow({
               {snapshot.eligible ? "Passed every hard rule when saved" : failedLabel}
             </p>
           ) : null}
+          {/* Controlled, against the draft above. `defaultValue` here would
+              re-read the cache on every reopen, which is the bug this replaced. */}
           <Textarea
             aria-label="Notes"
             className="min-h-16 text-[11px]"
-            defaultValue={site.notes ?? ""}
-            onBlur={(event) => {
-              const notes = event.target.value.trim();
-              if (notes !== (site.notes ?? "")) onNotes(notes);
-            }}
+            onBlur={onNoteCommit}
+            onChange={(event) => onNoteChange(event.target.value)}
             placeholder="Why this one?"
+            value={note}
           />
           <button
             className="flex items-center gap-1.5 rounded-md px-1 py-0.5 text-[11px] text-muted-foreground transition-colors hover:text-destructive"

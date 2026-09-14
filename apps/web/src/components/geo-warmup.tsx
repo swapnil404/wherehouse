@@ -79,12 +79,12 @@ export default function GeoWarmup() {
 
   useEffect(() => {
     if (ready) {
-      // Only worth announcing if we said it was warming in the first place.
-      // Otherwise a fast start would pop a toast to report that nothing
-      // happened.
-      if (announced.current) {
-        toast.success("Analysis engine ready", { id: TOAST_ID, duration: 2_500 });
-      }
+      // Dismissed rather than replaced with a success toast. The warming notice
+      // exists to explain a wait; once the wait is over the map fills in and
+      // says so on its own, and a second popup to announce that nothing is
+      // wrong is one more thing to read and dismiss. The dismissal is still
+      // required — the notice it clears has no duration of its own.
+      if (announced.current) toast.dismiss(TOAST_ID);
       return;
     }
 

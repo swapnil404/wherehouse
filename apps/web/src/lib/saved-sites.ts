@@ -56,6 +56,47 @@ export function toWeights(source: Record<string, number> | null | undefined): We
   return weights;
 }
 
+/**
+ * Whether two weight maps are the same *stored configuration*.
+ *
+ * Not the same thing as scoring identically, and the difference is deliberate.
+ * `compositeScore` reads a missing weight as zero, so `{}` and `{ poi: 0, … }`
+ * produce the same number — but they do not mean the same thing to a project.
+ * An empty map means "whatever this preset defines" and follows the preset if
+ * its numbers are ever retuned; a full map with a zero in it is a deliberate
+ * choice that should survive. Collapsing the two would skip the write that
+ * records that choice.
+ *
+ * Compared key by key over the known subscores rather than by deep equality,
+ * because unknown keys are not weights and key order is not information. Used
+ * on a debounce to decide whether the map has drifted from the project it was
+ * loaded from, so a false positive here is a database write per render.
+ */
+export function sameWeights(a: Weights, b: Weights): boolean {
+  return SUBSCORE_KEYS.every((key) => (a[key] ?? null) === (b[key] ?? null));
+}
+
+/**
+ * Which project the session is working in, given the list and the chosen id.
+ *
+ * The `null` and not-found cases are deliberately different. No choice yet
+ * means "the one you last worked in", which is index 0 because the server
+ * orders by `updatedAt`. A choice that is missing from the list means the list
+ * is mid-flight, and answering with a *different* project would be worse than
+ * answering with nothing: a save issued in that window would land in whichever
+ * project happened to sort first, which is how a site ends up filed under the
+ * project you just navigated away from.
+ */
+export function resolveActiveProject<T extends { id: string }>(
+  projects: readonly T[],
+  storedId: string | null,
+): T | null {
+  if (storedId !== null) {
+    return projects.find((project) => project.id === storedId) ?? null;
+  }
+  return projects[0] ?? null;
+}
+
 export function buildSnapshot(
   cell: ScoredCell,
   preset: PresetName,

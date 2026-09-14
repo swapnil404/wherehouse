@@ -6,6 +6,8 @@ import {
   defaultSiteName,
   nextSequentialName,
   parseSnapshot,
+  resolveActiveProject,
+  sameWeights,
   snapshotDrift,
   toWeights,
 } from "./saved-sites";
@@ -157,5 +159,52 @@ describe("nextSequentialName", () => {
 
   test("carries the prefix through", () => {
     assert.equal(nextSequentialName("Project", [{ name: "Project 1" }]), "Project 2");
+  });
+});
+
+describe("sameWeights", () => {
+  test("an absent key and an explicit zero are different weights", () => {
+    // Zero means "scored but ignored"; absent means the same thing to the
+    // composite, but the project round-trips `{}` through JSON as a distinct
+    // value and treating them as equal would skip a legitimate write.
+    assert.equal(sameWeights({}, { poi: 0 }), false);
+  });
+
+  test("key order and unknown keys do not matter", () => {
+    const a = { zoning: 2, demographics: 1 } as Record<string, number>;
+    const b = { demographics: 1, zoning: 2, nonsense: 9 } as Record<string, number>;
+    assert.equal(sameWeights(toWeights(a), toWeights(b)), true);
+  });
+
+  test("a single moved weight counts as a change", () => {
+    assert.equal(sameWeights(evenWeights, { ...evenWeights, flood: 2 }), false);
+  });
+
+  test("two empty maps are equal", () => {
+    assert.equal(sameWeights({}, {}), true);
+  });
+});
+
+describe("resolveActiveProject", () => {
+  const projects = [{ id: "newest" }, { id: "older" }];
+
+  test("no choice yet falls back to the most recently worked-in project", () => {
+    assert.deepEqual(resolveActiveProject(projects, null), { id: "newest" });
+  });
+
+  test("honours an explicit choice over list order", () => {
+    assert.deepEqual(resolveActiveProject(projects, "older"), { id: "older" });
+  });
+
+  test("a chosen id missing from the list resolves to nothing, not to something else", () => {
+    // This is the case that mattered: right after creating a project the id is
+    // set but the refetch has not landed. Substituting whichever project sorts
+    // first would file the next save under the project the user just left.
+    assert.equal(resolveActiveProject(projects, "not-loaded-yet"), null);
+  });
+
+  test("an empty list resolves to nothing either way", () => {
+    assert.equal(resolveActiveProject([], null), null);
+    assert.equal(resolveActiveProject([], "anything"), null);
   });
 });
