@@ -18,7 +18,7 @@ export default function GoogleSignInButton({
     await authClient.signIn.social(
       {
         provider: "google",
-        callbackURL: "/dashboard",
+        callbackURL: "/welcome",
       },
       {
         onRequest: () => setIsPending(true),

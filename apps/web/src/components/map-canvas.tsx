@@ -53,6 +53,7 @@ import {
 } from "@/lib/hotspots";
 import { computeGridAnalytics } from "@/lib/score-analytics";
 import {
+  PULSE_DURATION_MS,
   RING_COLOR,
   RING_WIDTH,
   expandedHexRing,
@@ -547,15 +548,21 @@ export default function MapCanvas() {
   const [pulse, setPulse] = useState<number | null>(null);
 
   /**
-   * The beacon runs for exactly as long as Reach is on and a cell is scored.
+   * The beacon runs twice when a cell is scored, whatever else is on.
    *
-   * Those two conditions are the situation it exists for: a white contour
-   * spreading across the city with the white selection ring somewhere inside
-   * it. With Reach off there is nothing to lose the cell in, so it stops and
-   * the plain ring is left to do the marking.
+   * It was gated on Reach, on the reasoning that a white contour spreading
+   * across the city was the only thing the selection could get lost in. That
+   * was too narrow: the score ramp alone puts a white ring on a near-white hex
+   * at the top of the scale, and the compare outlines, hotspot fills and drawn
+   * study areas all crowd the same map. The cell the whole right-hand panel is
+   * about should be findable in every one of those, not just one.
+   *
+   * It stops well before five seconds and leaves the steady selection ring in
+   * place. That avoids a permanent React render loop and still honours reduced
+   * motion below.
    */
   useEffect(() => {
-    if (!selectedH3 || !catchmentOn) {
+    if (!selectedH3) {
       setPulse(null);
       return;
     }
@@ -569,12 +576,17 @@ export default function MapCanvas() {
 
     const start = performance.now();
     let frame = requestAnimationFrame(function step(now) {
-      setPulse(now - start);
+      const elapsed = now - start;
+      if (elapsed >= PULSE_DURATION_MS) {
+        setPulse(null);
+        return;
+      }
+      setPulse(elapsed);
       frame = requestAnimationFrame(step);
     });
 
     return () => cancelAnimationFrame(frame);
-  }, [selectedH3, catchmentOn]);
+  }, [selectedH3]);
 
   const pulseState = pulse == null ? null : pulseFrame(pulse);
 
@@ -1322,8 +1334,8 @@ export default function MapCanvas() {
   /**
    * The beacon, built on its own.
    *
-   * Kept out of `baseLayers` deliberately. While Reach is on this is rebuilt
-   * sixty times a second and forever, and folding it into the memo above would
+   * Kept out of `baseLayers` deliberately. During its short run this is rebuilt
+   * sixty times a second, and folding it into the memo above would
    * drag every other layer — including two carrying a thousand cells each —
    * through a fresh construction and prop diff on every one of those frames.
    * Split out, a frame costs one six-vertex polygon and an array copy.

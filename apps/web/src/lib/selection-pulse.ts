@@ -3,26 +3,27 @@ import { cellToBoundary, cellToLatLng } from "h3-js";
 import { FOCUS_LINE, focusLineAt } from "./focus-mark";
 
 /**
- * A locator beacon on the scored cell, for as long as Reach is on.
+ * A short locator beacon when a cell is scored.
  *
- * The reach contour is white and so is the selection ring, and the contour can
- * enclose a third of the city — so the one hexagon the whole panel is about
- * became the hardest thing on the map to point at. This keeps pointing at it.
- *
- * **It runs only while Reach is on.** That is the situation it exists for, and
- * it is also what keeps it honest against WCAG 2.2.2: motion that starts on
- * its own and outlasts five seconds needs a way to stop it, and the switch
- * that started it is exactly that. With Reach off there is nothing to get lost
- * in, so the cell keeps its plain steady ring.
+ * The selection ring is a white outline on a map that also paints a red-to-
+ * white score ramp, white and grey hotspot fills, cyan drawn boundaries, white
+ * reach contours and up to four compare outlines. The one hexagon the whole
+ * right-hand panel is about is easy to lose in any of them, so this keeps
+ * pointing at it.
  *
  * **Rings travel outward rather than flashing on and off.** A marker that
  * blinks is invisible half the time, which is the opposite of findable if the
  * reader's eye lands during an off beat. The selection ring underneath never
  * moves or fades — only these do — so the cell stays marked at every instant.
+ *
+ * It stops after two rings. That is enough to lead the eye to the steady
+ * selection outline without keeping the map in a permanent render loop or
+ * requiring a separate motion control. Reduced-motion users skip it entirely.
  */
 
 /** One ring's lifetime. Slow enough to read as a beacon, not a strobe. */
 export const PULSE_PERIOD_MS = 1200;
+export const PULSE_DURATION_MS = PULSE_PERIOD_MS * 2;
 
 /** Resting ring, which the beacon draws on top of and never replaces. */
 export const RING_WIDTH = 3;
@@ -40,9 +41,8 @@ export interface PulseFrame {
 /**
  * One frame of the beacon, from milliseconds since it started.
  *
- * Takes elapsed time rather than a 0-1 progress because the animation has no
- * end to measure against any more — it wraps on the period for as long as the
- * switch is on. Negative input is folded back into range so a clock that jumps
+ * Takes elapsed time rather than a 0-1 progress so each of the two rings can
+ * reuse the same frame calculation. Negative input is folded back into range so a clock that jumps
  * backwards cannot produce a ring at negative scale.
  *
  * Alpha decays on a square rather than linearly: a ring fading at a constant

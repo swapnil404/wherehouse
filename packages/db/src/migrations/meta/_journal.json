@@ -15,6 +15,13 @@
       "when": 1788527520430,
       "tag": "0001_dusty_lord_hawal",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1789398451058,
+      "tag": "0002_first_eddie_brock",
+      "breakpoints": true
     }
   ]
 }

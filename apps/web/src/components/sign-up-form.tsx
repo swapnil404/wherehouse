@@ -52,7 +52,7 @@ export function SignUpForm({
         {
           onSuccess: () => {
             navigate({
-              to: "/dashboard",
+              to: "/welcome",
             });
             toast.success("Sign up successful");
           },
