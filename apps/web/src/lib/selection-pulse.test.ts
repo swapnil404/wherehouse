@@ -29,7 +29,7 @@ describe("pulseFrame", () => {
   });
 
   test("loops forever instead of expiring", () => {
-    // The beacon runs for as long as Reach is on, so an elapsed time an hour
+    // The beacon runs for as long as a cell is selected, so an elapsed time an hour
     // in has to produce the same ring as the first frame rather than a ring
     // scaled off the edge of the map or an alpha stuck at zero.
     for (const period of [0, 1, 7, 300, 3000]) {

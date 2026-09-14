@@ -3,22 +3,23 @@ import { cellToBoundary, cellToLatLng } from "h3-js";
 import { FOCUS_LINE, focusLineAt } from "./focus-mark";
 
 /**
- * A locator beacon on the scored cell, for as long as Reach is on.
+ * A locator beacon on the scored cell, for as long as one is scored.
  *
- * The reach contour is white and so is the selection ring, and the contour can
- * enclose a third of the city — so the one hexagon the whole panel is about
- * became the hardest thing on the map to point at. This keeps pointing at it.
- *
- * **It runs only while Reach is on.** That is the situation it exists for, and
- * it is also what keeps it honest against WCAG 2.2.2: motion that starts on
- * its own and outlasts five seconds needs a way to stop it, and the switch
- * that started it is exactly that. With Reach off there is nothing to get lost
- * in, so the cell keeps its plain steady ring.
+ * The selection ring is a white outline on a map that also paints a red-to-
+ * white score ramp, white and grey hotspot fills, cyan drawn boundaries, white
+ * reach contours and up to four compare outlines. The one hexagon the whole
+ * right-hand panel is about is easy to lose in any of them, so this keeps
+ * pointing at it.
  *
  * **Rings travel outward rather than flashing on and off.** A marker that
  * blinks is invisible half the time, which is the opposite of findable if the
  * reader's eye lands during an off beat. The selection ring underneath never
  * moves or fades — only these do — so the cell stays marked at every instant.
+ *
+ * **Stopping it.** This used to run only while Reach was on, which doubled as
+ * the control WCAG 2.2.2 wants for motion that outlasts five seconds. It now
+ * runs whenever a cell is selected, so `prefers-reduced-motion` is the only
+ * way to stop it — the accommodation that matters, but not an in-page control.
  */
 
 /** One ring's lifetime. Slow enough to read as a beacon, not a strobe. */

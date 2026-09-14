@@ -547,15 +547,21 @@ export default function MapCanvas() {
   const [pulse, setPulse] = useState<number | null>(null);
 
   /**
-   * The beacon runs for exactly as long as Reach is on and a cell is scored.
+   * The beacon runs for as long as a cell is scored, whatever else is on.
    *
-   * Those two conditions are the situation it exists for: a white contour
-   * spreading across the city with the white selection ring somewhere inside
-   * it. With Reach off there is nothing to lose the cell in, so it stops and
-   * the plain ring is left to do the marking.
+   * It was gated on Reach, on the reasoning that a white contour spreading
+   * across the city was the only thing the selection could get lost in. That
+   * was too narrow: the score ramp alone puts a white ring on a near-white hex
+   * at the top of the scale, and the compare outlines, hotspot fills and drawn
+   * study areas all crowd the same map. The cell the whole right-hand panel is
+   * about should be findable in every one of those, not just one.
+   *
+   * Reach is no longer the way to stop it, so `prefers-reduced-motion` is now
+   * the only way — which is the accommodation that matters, and it is honoured
+   * below. Worth knowing if this ever needs an in-page control for WCAG 2.2.2.
    */
   useEffect(() => {
-    if (!selectedH3 || !catchmentOn) {
+    if (!selectedH3) {
       setPulse(null);
       return;
     }
@@ -574,7 +580,7 @@ export default function MapCanvas() {
     });
 
     return () => cancelAnimationFrame(frame);
-  }, [selectedH3, catchmentOn]);
+  }, [selectedH3]);
 
   const pulseState = pulse == null ? null : pulseFrame(pulse);
 
