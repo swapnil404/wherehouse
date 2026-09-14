@@ -37,24 +37,24 @@ function withCredentials(url: RequestInfo | URL, options?: RequestInit) {
 }
 
 /**
- * Batching, except for the warmup probe.
+ * Keep application data away from analysis traffic.
  *
- * `geo.health` waits on a service that is deliberately allowed to be asleep,
- * so it can sit for seconds at a time. Batched, it drags whatever shares its
- * HTTP request down with it — a save or a project list issued in the same tick
- * finishes no sooner than the probe does, and a probe whose socket dies takes
- * the whole batch with it. That turns "the analysis engine is warming up" into
- * "saving hangs and random things error", which is precisely the failure the
- * probe exists to explain.
- *
- * One slow request that blocks nothing is the entire point, so it gets its own.
+ * A tRPC batch is delivered only after every operation in it finishes. Project
+ * reads were sharing one with heatmap and scoring calls, so a cold Render
+ * sidecar made a fast Neon response appear to take nearly a minute. Separate
+ * batch links preserve batching within each workload without coupling their
+ * latency or failure modes. Health remains unbatched because it polls.
  */
 const trpcClient = createTRPCClient<AppRouter>({
   links: [
     splitLink({
       condition: (op) => op.path === "geo.health",
       true: httpLink({ url: "/api/trpc", fetch: withCredentials }),
-      false: httpBatchLink({ url: "/api/trpc", fetch: withCredentials }),
+      false: splitLink({
+        condition: (op) => op.path.startsWith("geo."),
+        true: httpBatchLink({ url: "/api/trpc", fetch: withCredentials }),
+        false: httpBatchLink({ url: "/api/trpc", fetch: withCredentials }),
+      }),
     }),
   ],
 });

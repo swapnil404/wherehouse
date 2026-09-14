@@ -21,16 +21,15 @@ export type SavedSite = Project["savedSites"][number];
  * into an active project lives in `resolveActiveProject` so the header and the
  * saved list can never disagree about which project is open.
  *
- * **Every mutation patches the cache before invalidating.** Invalidation alone
+ * **Every mutation patches the cache from its response.** Invalidation alone
  * leaves a window between the write landing and the re-read arriving in which
  * the UI still describes the world as it was, and in this feature that window
  * is not cosmetic: for as long as it is open the freshly created project is
  * absent from the list, so a save aims at whichever project sorts first, and
  * the freshly saved site is absent from its project, so the Save button offers
  * itself again and a second click burns another of the five slots on a
- * duplicate. The patch is about *membership* — which projects exist, which
- * sites are in them — and does not try to reproduce the server's `updatedAt`
- * ordering. The refetch that follows reconciles that.
+ * duplicate. Mutation responses are authoritative, so immediately downloading
+ * the same list again only adds latency and database traffic.
  */
 export function useProjects() {
   const trpc = useTRPC();
@@ -39,7 +38,13 @@ export function useProjects() {
   const setActiveProjectId = useProjectStore((state) => state.setActiveProjectId);
   const applyProjectSetup = useMapStore((state) => state.applyProjectSetup);
 
-  const list = useQuery(trpc.projects.list.queryOptions());
+  const list = useQuery({
+    ...trpc.projects.list.queryOptions(),
+    // All project writes below update this exact cache. Refocusing the browser
+    // should not turn into another Neon read.
+    staleTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
+  });
   const projects = list.data ?? [];
   const active = resolveActiveProject(projects, storedId);
 
@@ -55,20 +60,6 @@ export function useProjects() {
     patchList((current) =>
       current.map((project) => (project.id === projectId ? update(project) : project)),
     );
-  };
-
-  /**
-   * Deliberately not awaited by the mutations below.
-   *
-   * React Query keeps a mutation `isPending` until its `onSuccess` settles, so
-   * returning this promise makes "Saving…" cover the write *and* a full re-read
-   * of every project and its sites. The write is the part the button is about.
-   * The cache patch that precedes each call is what makes that safe — without
-   * it, dropping the await would just move the lie from the spinner to the
-   * list.
-   */
-  const invalidate = () => {
-    void queryClient.invalidateQueries(trpc.projects.list.queryFilter());
   };
 
   const reportFailure = (error: unknown) => {
@@ -93,7 +84,6 @@ export function useProjects() {
         // the old one is a dead click.
         patchList((current) => [{ ...project, savedSites: [] }, ...current]);
         setActiveProjectId(project.id);
-        invalidate();
       },
       onError: reportFailure,
     }),
@@ -124,7 +114,6 @@ export function useProjects() {
         // would empty the saved list.
         patchProject(project.id, (current) => ({ ...current, ...project }));
       },
-      onSettled: invalidate,
     }),
   );
 
@@ -138,7 +127,6 @@ export function useProjects() {
         // null, resolution falls to the most recently worked-in project that
         // survives, and the switcher notices the change and hands the map over.
         if (variables.projectId === storedId) setActiveProjectId(null);
-        invalidate();
       },
       onError: reportFailure,
     }),
@@ -151,7 +139,6 @@ export function useProjects() {
           ...current,
           savedSites: [site, ...current.savedSites],
         }));
-        invalidate();
       },
       onError: reportFailure,
     }),
@@ -198,7 +185,6 @@ export function useProjects() {
           ),
         }));
       },
-      onSettled: invalidate,
     }),
   );
 
@@ -213,7 +199,6 @@ export function useProjects() {
             savedSites: project.savedSites.filter((site) => site.id !== variables.siteId),
           })),
         );
-        invalidate();
       },
       onError: reportFailure,
     }),

@@ -49,7 +49,9 @@ const CHROME =
  * drag. Long enough to coalesce a drag, short enough that a reload right after
  * tuning does not lose it.
  */
-const SETUP_WRITE_DELAY_MS = 1_200;
+// Let a person finish tuning several priorities before syncing the resulting
+// setup. Switching projects still flushes an unsettled edit immediately.
+const SETUP_WRITE_DELAY_MS = 4_000;
 
 type Mode = "idle" | "renaming" | "confirmDelete";
 
