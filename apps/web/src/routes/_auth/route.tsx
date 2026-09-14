@@ -1,6 +1,5 @@
 import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
 
-import Header from "@/components/header";
 import { getUser } from "@/functions/get-user";
 
 export const Route = createFileRoute("/_auth")({
@@ -12,8 +11,8 @@ export const Route = createFileRoute("/_auth")({
         to: "/login",
       });
     }
-    // Begin the one project read as soon as authentication succeeds. Header
-    // and dashboard consumers reuse this same in-flight cache entry.
+    // Begin the one project read as soon as authentication succeeds. The
+    // welcome setup and dashboard reuse this same in-flight cache entry.
     void context.queryClient.prefetchQuery({
       ...context.trpc.projects.list.queryOptions(),
       staleTime: 10 * 60 * 1000,
@@ -30,10 +29,5 @@ export const Route = createFileRoute("/_auth")({
 });
 
 function AuthLayout() {
-  return (
-    <div className="grid h-full grid-rows-[auto_1fr]">
-      <Header />
-      <Outlet />
-    </div>
-  );
+  return <Outlet />;
 }

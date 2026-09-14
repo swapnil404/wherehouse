@@ -1,5 +1,5 @@
 import { ArrowLeftIcon, ArrowRightIcon, CheckIcon } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 import { SUBSCORE_KEYS, SUBSCORE_LABELS, type PresetName, type Weights } from "@/lib/cells";
 import {
@@ -211,6 +211,10 @@ export default function OnboardingWizard({
                   selected={answers.priorities}
                 />
               ) : null}
+
+              <p className="mt-3 text-right font-mono text-[10px] text-muted-foreground/60">
+                1–9 choose · arrow keys move
+              </p>
             </div>
           </>
         )}
@@ -260,6 +264,40 @@ const ROW =
 const ROW_ON = "border-accent/70 bg-accent/10 text-foreground";
 const ROW_OFF = "border-white/10 text-foreground/85 hover:border-white/20 hover:bg-white/5";
 
+function keyedOptionIndex(
+  event: React.KeyboardEvent,
+  buttons: readonly (HTMLButtonElement | null)[],
+) {
+  if (/^[1-9]$/.test(event.key)) {
+    const index = Number(event.key) - 1;
+    return index < buttons.length ? index : null;
+  }
+
+  const direction =
+    event.key === "ArrowDown" || event.key === "ArrowRight"
+      ? 1
+      : event.key === "ArrowUp" || event.key === "ArrowLeft"
+        ? -1
+        : 0;
+  if (direction === 0) return null;
+
+  const focused = buttons.findIndex((button) => button === document.activeElement);
+  const start = focused >= 0 ? focused : direction > 0 ? -1 : 0;
+  for (let offset = 1; offset <= buttons.length; offset += 1) {
+    const index = (start + direction * offset + buttons.length) % buttons.length;
+    if (!buttons[index]?.disabled) return index;
+  }
+  return null;
+}
+
+function NumberKey({ index }: { index: number }) {
+  return (
+    <span className="w-3 shrink-0 text-center font-mono text-[10px] text-muted-foreground/65 tabular-nums">
+      {index + 1}
+    </span>
+  );
+}
+
 function Marker({ on, round }: { on: boolean; round: boolean }) {
   return (
     <span
@@ -284,19 +322,40 @@ function SingleSelect<T extends string>({
   onSelect: (value: T) => void;
   label: string;
 }) {
+  const buttons = useRef<(HTMLButtonElement | null)[]>([]);
+
   return (
-    <div aria-label={label} className="flex flex-col gap-2" role="radiogroup">
-      {options.map((option) => {
+    <div
+      aria-label={label}
+      className="flex flex-col gap-2"
+      onKeyDown={(event) => {
+        const index = keyedOptionIndex(event, buttons.current);
+        if (index === null) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const option = options[index];
+        if (!option) return;
+        buttons.current[index]?.focus();
+        onSelect(option.value);
+      }}
+      role="radiogroup"
+    >
+      {options.map((option, index) => {
         const on = selected === option.value;
         return (
           <button
             aria-checked={on}
+            autoFocus={on || (selected === null && index === 0)}
             className={`${ROW} ${on ? ROW_ON : ROW_OFF}`}
             key={option.value}
             onClick={() => onSelect(option.value)}
+            ref={(button) => {
+              buttons.current[index] = button;
+            }}
             role="radio"
             type="button"
           >
+            <NumberKey index={index} />
             <Marker on={on} round />
             {option.label}
           </button>
@@ -318,19 +377,41 @@ function MultiSelect<T extends string>({
   /** Set once a cap is reached, so the limit is visible rather than silent. */
   disabledUnselected?: boolean;
 }) {
+  const buttons = useRef<(HTMLButtonElement | null)[]>([]);
+
   return (
-    <div className="flex flex-col gap-2">
-      {options.map((option) => {
+    <div
+      className="flex flex-col gap-2"
+      onKeyDown={(event) => {
+        const index = keyedOptionIndex(event, buttons.current);
+        if (index === null) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const option = options[index];
+        const button = buttons.current[index];
+        if (!option || !button) return;
+        button.focus();
+        // Number keys are direct choices. Arrow keys only move through a
+        // checkbox list, preserving Space/Enter as the deliberate toggle.
+        if (/^[1-9]$/.test(event.key) && !button.disabled) onToggle(option.value);
+      }}
+    >
+      {options.map((option, index) => {
         const on = selected.includes(option.value);
         return (
           <button
             aria-pressed={on}
+            autoFocus={index === 0}
             className={`${ROW} ${on ? ROW_ON : ROW_OFF} disabled:cursor-not-allowed disabled:opacity-35`}
             disabled={!on && disabledUnselected}
             key={option.value}
             onClick={() => onToggle(option.value)}
+            ref={(button) => {
+              buttons.current[index] = button;
+            }}
             type="button"
           >
+            <NumberKey index={index} />
             <Marker on={on} round={false} />
             {option.label}
           </button>
