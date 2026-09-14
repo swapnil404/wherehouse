@@ -1490,9 +1490,8 @@ export default function MapCanvas() {
             )}
           </p>
         ) : studyArea ? (
-          /* The only way out of a study area if the Layers card is closed.
-             The card still owns the tools; this owns the undo, because the
-             thing being undone is on the map rather than in the card. */
+          /* Keep the undo beside the boundary it affects. The layers card also
+             exposes it, but may be scrolled while the area remains visible. */
           <p className={`pointer-events-auto ${panelPill} text-muted-foreground`}>
             <ScanIcon className="size-3.5 shrink-0" style={{ color: STUDY_AREA_COLOR }} />
             {/* The count is dropped while the grid is in flight rather than

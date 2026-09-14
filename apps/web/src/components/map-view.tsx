@@ -10,14 +10,9 @@ import CompareTray from "./compare-tray";
 /**
  * The map, full bleed, with everything else floating over a corner of it.
  *
- * There is no settings column any more. There was a 256px rail down the left
- * edge holding nothing but configuration, which spent a fifth of the window
- * permanently on controls and made a wall of them the first thing on screen
- * in a product whose subject is the map behind them. Trimming it helped
- * twice and it was still a settings column.
- *
- * So the controls went to what they affect rather than into a drawer of
- * their own:
+ * Controls live beside what they affect. The layers card stays visible because
+ * it is the map's legend and tool shelf, while the results card owns the answer
+ * and the priorities that shape it:
  *
  *   top-left      what you are looking for, and what is drawn
  *   top-right     the answer, and the priorities that shape it
@@ -26,8 +21,7 @@ import CompareTray from "./compare-tray";
  *   bottom-right  MapLibre attribution
  *
  * Nothing dodges anything: each floating element owns a corner, and the two
- * that can grow (layers, results) open downward into space no other element
- * claims.
+ * tall cards scroll inside their own bounds.
  *
  * All of them render outside the client-only boundary, so the chrome is
  * complete on first paint rather than appearing when the deck.gl chunk

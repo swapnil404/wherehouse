@@ -1,5 +1,4 @@
 import { Link } from "@tanstack/react-router";
-import { MapPinIcon } from "lucide-react";
 
 import ProjectSwitcher from "./project-switcher";
 import UserMenu from "./user-menu";
@@ -34,11 +33,6 @@ export default function Header() {
 
         <span className="hidden h-5 w-px bg-white/10 sm:block" aria-hidden />
         <ProjectSwitcher />
-
-        <div className="ml-1 hidden min-w-0 items-center gap-1.5 text-xs text-muted-foreground md:flex">
-          <MapPinIcon className="size-3.5 text-primary/80" aria-hidden />
-          <span className="truncate">Austin, Texas</span>
-        </div>
       </div>
 
       <UserMenu />

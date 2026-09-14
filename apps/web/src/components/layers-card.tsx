@@ -2,18 +2,10 @@ import { Checkbox } from "@wherehouse/ui/components/checkbox";
 import { Label } from "@wherehouse/ui/components/label";
 import { Separator } from "@wherehouse/ui/components/separator";
 import { Slider } from "@wherehouse/ui/components/slider";
-import {
-  ChevronDownIcon,
-  CircleDashedIcon,
-  LayersIcon,
-  PencilLineIcon,
-  ScanIcon,
-} from "lucide-react";
-import { useCallback, useState } from "react";
+import { CircleDashedIcon, LayersIcon, PencilLineIcon, ScanIcon } from "lucide-react";
 
 import { GRID_MEASURES } from "@/lib/heatmap-palette";
 import { describeStudyArea, type DrawMode } from "@/lib/study-area";
-import { useEscapeToClose } from "@/lib/use-escape-to-close";
 import { LAYER_META, useMapStore, type LayerId } from "@/stores/map-store";
 
 import AnalysisPanel from "./analysis-panel";
@@ -168,7 +160,7 @@ function LayerRow({ id }: { id: LayerId }) {
  * deliberately survives an outside click — so left open it would be in the
  * way with no obvious way out.
  */
-function DrawTools({ onArm }: { onArm: () => void }) {
+function DrawTools() {
   const drawMode = useMapStore((s) => s.drawMode);
   const studyArea = useMapStore((s) => s.studyArea);
   const setDrawMode = useMapStore((s) => s.setDrawMode);
@@ -182,7 +174,6 @@ function DrawTools({ onArm }: { onArm: () => void }) {
       return;
     }
     setDrawMode(mode);
-    onArm();
   };
 
   return (
@@ -234,34 +225,12 @@ function DrawTools({ onArm }: { onArm: () => void }) {
 }
 
 /**
- * What is drawn on the map, on demand.
- *
- * This was a docked 256px rail down the left edge. Everything in it was
- * configuration, so a fifth of the window was permanently spent on settings
- * for a product whose entire subject is the map behind them, and the first
- * thing the eye met on load was a column of controls rather than Austin.
- *
- * The controls did not need to go; the column did. These are the ones that
- * change what the map draws, so they live on the map, behind a labelled
- * button, and cost nothing until asked for. The ones that change what the
- * score means moved the other way, into the results card beside the ranking
- * they reorder.
- *
- * A count on the button so the closed state still reports whether anything
- * is on. Without it, switching a layer off and forgetting is invisible.
- *
- * It stays open until the button or Escape closes it. Dismissing on an
- * outside press is the usual popover behaviour and was actively hostile
- * here: the map is what is outside the panel, and clicking the map is the
- * app's main action, so ticking an overlay and then scoring a cell shut the
- * panel every single time.
+ * The permanent left-side companion to the results card. These controls are
+ * used while reading the map, so hiding them behind a disclosure made the
+ * product's available data and area tools needlessly hard to discover.
  */
 export default function LayersCard() {
-  const [open, setOpen] = useState(false);
   const layers = useMapStore((s) => s.layers);
-
-  const close = useCallback(() => setOpen(false), []);
-  useEscapeToClose(open, close);
 
   const activeCount =
     LAYER_META.filter((m) => m.available && layers[m.id].visible).length +
@@ -269,52 +238,40 @@ export default function LayersCard() {
     (layers.underserved.visible ? 1 : 0);
 
   return (
-    <div className="pointer-events-auto relative">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        className={`flex items-center gap-2 py-1.5 pr-2 pl-3 text-xs font-medium transition-colors hover:bg-black/85 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring/50 focus-visible:outline-none ${panelSurface}`}
-      >
+    <aside
+      aria-label="Map layers and area tools"
+      className={`pointer-events-auto flex max-h-[calc(100vh-8rem)] w-64 flex-col ${panelSurface}`}
+    >
+      <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2.5 text-xs font-medium">
         <LayersIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
         Map layers
-        {activeCount > 0 ? (
-          <span className="rounded-full bg-foreground/10 px-1.5 py-px font-mono text-[10px] tabular-nums">
-            {activeCount}
-          </span>
-        ) : null}
-        <ChevronDownIcon
-          className={`size-3 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`}
-          aria-hidden
-        />
-      </button>
+        <span className="ml-auto rounded-full bg-foreground/10 px-1.5 py-px font-mono text-[10px] text-muted-foreground tabular-nums">
+          {activeCount} on
+        </span>
+      </div>
 
-      {open ? (
-        <div
-          className={`scrollbar-subtle absolute top-full left-0 mt-2 max-h-[70vh] w-64 overflow-y-auto p-3 ${panelSurface}`}
-        >
-          <SectionLabel>Show on map</SectionLabel>
-          <div className="mt-1.5">
-            {LAYER_META.map((meta) => (
-              <LayerRow key={meta.id} id={meta.id} />
-            ))}
-          </div>
-
-          <Separator className="my-3" />
-
-          <SectionLabel>Focus an area</SectionLabel>
-          <div className="mt-1.5">
-            <DrawTools onArm={close} />
-          </div>
-
-          <Separator className="my-3" />
-
-          <SectionLabel>Find patterns</SectionLabel>
-          <div className="mt-1.5">
-            <AnalysisPanel />
-          </div>
+      <div className="scrollbar-subtle min-h-0 overflow-y-auto p-3">
+        <SectionLabel>Show on map</SectionLabel>
+        <div className="mt-1.5">
+          {LAYER_META.map((meta) => (
+            <LayerRow key={meta.id} id={meta.id} />
+          ))}
         </div>
-      ) : null}
-    </div>
+
+        <Separator className="my-3" />
+
+        <SectionLabel>Focus an area</SectionLabel>
+        <div className="mt-1.5">
+          <DrawTools />
+        </div>
+
+        <Separator className="my-3" />
+
+        <SectionLabel>Find patterns</SectionLabel>
+        <div className="mt-1.5">
+          <AnalysisPanel />
+        </div>
+      </div>
+    </aside>
   );
 }

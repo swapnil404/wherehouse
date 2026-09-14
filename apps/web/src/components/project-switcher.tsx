@@ -310,11 +310,11 @@ export default function ProjectSwitcher() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        className={`${CHROME} transition-colors hover:bg-white/5 focus-visible:ring-1 focus-visible:ring-ring/50 focus-visible:outline-none`}
+        className={`${CHROME} max-w-[55vw] transition-colors hover:bg-white/5 focus-visible:ring-1 focus-visible:ring-ring/50 focus-visible:outline-none sm:max-w-72`}
         aria-label={`Active project: ${active?.name ?? "none"}`}
       >
         <FolderIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-        <span className="max-w-32 truncate font-medium">{active?.name}</span>
+        <span className="min-w-0 truncate font-medium">{active?.name}</span>
         {active ? (
           <span className="rounded-full bg-white/10 px-1.5 py-px font-mono text-[10px] text-muted-foreground tabular-nums">
             {active.savedSites.length}
@@ -323,7 +323,7 @@ export default function ProjectSwitcher() {
         <ChevronsUpDownIcon className="size-3 shrink-0 text-muted-foreground" aria-hidden />
       </DropdownMenuTrigger>
 
-      <DropdownMenuContent align="start" className="w-60">
+      <DropdownMenuContent align="start" className="w-72 p-1.5">
         <DropdownMenuRadioGroup
           value={active?.id ?? ""}
           // Selects only. Handing the map over is the effect above's job, so
@@ -335,20 +335,23 @@ export default function ProjectSwitcher() {
               content only mounts on open — so a label one level too high is an
               error the moment the menu is clicked, not a layout nit. It also
               belongs here on the merits: it names these options. */}
-          <DropdownMenuLabel className="text-[10px] uppercase tracking-[0.09em] text-muted-foreground">
-            Projects
+          <DropdownMenuLabel className="flex items-center justify-between px-2.5 text-[10px] uppercase tracking-[0.09em] text-muted-foreground">
+            <span>Projects</span>
+            <span className="font-mono tracking-normal tabular-nums">{projects.length}</span>
           </DropdownMenuLabel>
           {projects.map((project) => (
-            <div className="group/project flex items-center gap-0.5" key={project.id}>
-              <DropdownMenuRadioItem className="min-w-0 flex-1" value={project.id}>
-                <span className="min-w-0 flex-1 truncate">{project.name}</span>
-                <span className="shrink-0 text-[10px] text-muted-foreground tabular-nums">
-                  {project.savedSites.length}
+            <div className="group/project flex items-stretch gap-1" key={project.id}>
+              <DropdownMenuRadioItem className="min-w-0 flex-1 py-2.5" value={project.id}>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-medium">{project.name}</span>
+                  <span className="mt-0.5 block text-[10px] text-muted-foreground tabular-nums">
+                    {project.savedSites.length} saved {project.savedSites.length === 1 ? "site" : "sites"}
+                  </span>
                 </span>
               </DropdownMenuRadioItem>
               <DropdownMenuItem
                 aria-label={`Rename ${project.name}`}
-                className="size-8 justify-center p-0 text-muted-foreground opacity-50 transition-opacity hover:text-foreground group-hover/project:opacity-100"
+                className="w-8 justify-center p-0 text-muted-foreground/60 transition-colors hover:bg-white/8 hover:text-foreground"
                 onClick={() => {
                   setActionProjectId(project.id);
                   setNameDraft(project.name);
@@ -359,7 +362,7 @@ export default function ProjectSwitcher() {
               </DropdownMenuItem>
               <DropdownMenuItem
                 aria-label={`Delete ${project.name}`}
-                className="size-8 justify-center p-0 text-muted-foreground opacity-50 transition-opacity hover:text-destructive group-hover/project:opacity-100"
+                className="w-8 justify-center p-0 text-muted-foreground/60 transition-colors hover:bg-destructive/10 hover:text-destructive"
                 onClick={() => {
                   setActionProjectId(project.id);
                   setMode("confirmDelete");
@@ -371,10 +374,14 @@ export default function ProjectSwitcher() {
           ))}
         </DropdownMenuRadioGroup>
 
-        <DropdownMenuSeparator />
-        <DropdownMenuItem disabled={createProject.isPending} onClick={handleCreate}>
+        <DropdownMenuSeparator className="my-1" />
+        <DropdownMenuItem
+          className="justify-center border border-dashed border-white/15 py-2.5 text-foreground hover:border-white/30"
+          disabled={createProject.isPending}
+          onClick={handleCreate}
+        >
           <PlusIcon className="size-3.5" aria-hidden />
-          New project
+          {createProject.isPending ? "Creating…" : "Create project"}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
