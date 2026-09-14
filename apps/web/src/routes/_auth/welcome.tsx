@@ -1,11 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { CompassIcon, ListChecksIcon } from "lucide-react";
+import { ArrowRightIcon, CompassIcon, ListChecksIcon } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
 import OnboardingWizard from "@/components/onboarding-wizard";
-import { panelSurface, text } from "@/components/panel-styles";
+import { text } from "@/components/panel-styles";
 import { authClient } from "@/lib/auth-client";
 import type { Weights } from "@/lib/cells";
 import { deriveSetup, projectNameFor, type Answers } from "@/lib/onboarding";
@@ -101,8 +101,12 @@ function RouteComponent() {
 
   return (
     <div className="flex min-h-full items-center justify-center px-6 py-10">
-      <div className="flex w-full max-w-xl flex-col items-center">
-        <h1 className="text-center font-display text-2xl font-semibold">
+      <div
+        className={`flex w-full flex-col items-center transition-[max-width] duration-300 ${
+          asking ? "max-w-xl" : "max-w-2xl"
+        }`}
+      >
+        <h1 className="text-center font-display text-3xl font-semibold tracking-[0.02em]">
           Welcome{firstName ? `, ${firstName}` : ""}
         </h1>
         <p className={`mt-2 text-center ${text.hint}`}>
@@ -120,17 +124,19 @@ function RouteComponent() {
               presetWeights={presets.data ?? null}
             />
           ) : (
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid gap-4 sm:grid-cols-2">
               <ChoiceCard
                 description="Six questions about the site you want. We set the use case, the scoring weights and the search area from your answers."
-                icon={<ListChecksIcon className="size-4" aria-hidden />}
+                footnote="About a minute"
+                icon={<ListChecksIcon className="size-[18px]" aria-hidden />}
                 onClick={() => setAsking(true)}
                 primary
                 title="Answer a few questions"
               />
               <ChoiceCard
                 description="Open the map as it is. Every control the questions would have set is available there anyway."
-                icon={<CompassIcon className="size-4" aria-hidden />}
+                footnote="Nothing preconfigured"
+                icon={<CompassIcon className="size-[18px]" aria-hidden />}
                 onClick={() => navigate({ to: "/dashboard" })}
                 title="Free browse"
               />
@@ -142,36 +148,78 @@ function RouteComponent() {
   );
 }
 
+/**
+ * One of the two ways into the app.
+ *
+ * On `bg-card` rather than the map's `panelSurface`. That style is translucent
+ * black over a backdrop blur, which earns its keep floating above a thousand
+ * coloured hexagons and does nothing at all on a solid black page — the cards
+ * read as weightless outlines because there was no surface under them and
+ * nothing behind them to blur. `--card` is a real elevated grey, so they sit on
+ * the page instead of being scratched into it.
+ *
+ * The footer is pinned with `mt-auto`, which is what keeps the two cards the
+ * same height and their arrows on one line no matter how differently their
+ * descriptions wrap. Before that, the shorter card carried a block of dead
+ * space and the pair looked misaligned rather than parallel.
+ */
 function ChoiceCard({
   title,
   description,
+  footnote,
   icon,
   primary = false,
   onClick,
 }: {
   title: string;
   description: string;
+  /** The cost of choosing this, which is the thing being weighed. */
+  footnote: string;
   icon: React.ReactNode;
   primary?: boolean;
   onClick: () => void;
 }) {
   return (
     <button
-      className={`flex h-full flex-col items-start gap-2 p-4 text-left transition-colors focus-visible:ring-1 focus-visible:ring-ring/50 focus-visible:outline-none ${panelSurface} ${
-        primary ? "border-accent/60 hover:bg-accent/10" : "hover:bg-white/5"
+      className={`group relative flex h-full flex-col overflow-hidden rounded-lg border bg-card p-5 text-left transition-all duration-200 focus-visible:ring-1 focus-visible:ring-ring/50 focus-visible:outline-none ${
+        primary
+          ? "border-accent/45 hover:border-accent/80"
+          : "border-border hover:border-white/30"
       }`}
       onClick={onClick}
       type="button"
     >
+      {/* A bloom rather than a fill: the accent at full strength over a whole
+          card would out-shout the map it is introducing. */}
+      {primary ? (
+        <span
+          aria-hidden
+          className="pointer-events-none absolute -top-20 -left-16 size-48 rounded-full bg-accent/25 blur-3xl transition-opacity duration-300 group-hover:bg-accent/35"
+        />
+      ) : null}
+
       <span
-        className={`grid size-8 place-items-center rounded-md ${
-          primary ? "bg-accent text-accent-foreground" : "bg-white/8 text-muted-foreground"
+        className={`relative grid size-10 place-items-center rounded-xl ${
+          primary
+            ? "bg-accent text-accent-foreground shadow-[0_0_20px_-4px_var(--accent)]"
+            : "bg-white/8 text-muted-foreground ring-1 ring-white/10"
         }`}
       >
         {icon}
       </span>
-      <span className="text-[13px] font-medium text-foreground">{title}</span>
-      <span className={text.hint}>{description}</span>
+
+      <span className="relative mt-4 text-[15px] font-medium text-foreground">{title}</span>
+      <span className={`relative mt-1.5 ${text.hint}`}>{description}</span>
+
+      <span className="relative mt-auto flex items-center gap-2 pt-5">
+        <span className={text.label}>{footnote}</span>
+        <ArrowRightIcon
+          aria-hidden
+          className={`ml-auto size-4 transition-transform duration-200 group-hover:translate-x-0.5 ${
+            primary ? "text-accent" : "text-muted-foreground"
+          }`}
+        />
+      </span>
     </button>
   );
 }
