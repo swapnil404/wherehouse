@@ -53,6 +53,7 @@ import {
 } from "@/lib/hotspots";
 import { computeGridAnalytics } from "@/lib/score-analytics";
 import {
+  PULSE_DURATION_MS,
   RING_COLOR,
   RING_WIDTH,
   expandedHexRing,
@@ -547,7 +548,7 @@ export default function MapCanvas() {
   const [pulse, setPulse] = useState<number | null>(null);
 
   /**
-   * The beacon runs for as long as a cell is scored, whatever else is on.
+   * The beacon runs twice when a cell is scored, whatever else is on.
    *
    * It was gated on Reach, on the reasoning that a white contour spreading
    * across the city was the only thing the selection could get lost in. That
@@ -556,9 +557,9 @@ export default function MapCanvas() {
    * study areas all crowd the same map. The cell the whole right-hand panel is
    * about should be findable in every one of those, not just one.
    *
-   * Reach is no longer the way to stop it, so `prefers-reduced-motion` is now
-   * the only way — which is the accommodation that matters, and it is honoured
-   * below. Worth knowing if this ever needs an in-page control for WCAG 2.2.2.
+   * It stops well before five seconds and leaves the steady selection ring in
+   * place. That avoids a permanent React render loop and still honours reduced
+   * motion below.
    */
   useEffect(() => {
     if (!selectedH3) {
@@ -575,7 +576,12 @@ export default function MapCanvas() {
 
     const start = performance.now();
     let frame = requestAnimationFrame(function step(now) {
-      setPulse(now - start);
+      const elapsed = now - start;
+      if (elapsed >= PULSE_DURATION_MS) {
+        setPulse(null);
+        return;
+      }
+      setPulse(elapsed);
       frame = requestAnimationFrame(step);
     });
 
@@ -1328,8 +1334,8 @@ export default function MapCanvas() {
   /**
    * The beacon, built on its own.
    *
-   * Kept out of `baseLayers` deliberately. While Reach is on this is rebuilt
-   * sixty times a second and forever, and folding it into the memo above would
+   * Kept out of `baseLayers` deliberately. During its short run this is rebuilt
+   * sixty times a second, and folding it into the memo above would
    * drag every other layer — including two carrying a thousand cells each —
    * through a fresh construction and prop diff on every one of those frames.
    * Split out, a frame costs one six-vertex polygon and an array copy.

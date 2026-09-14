@@ -19,10 +19,15 @@ const answers = (overrides: Partial<Answers> = {}): Answers => ({
   purpose: "food",
   scope: "city",
   access: "none",
-  requirements: ["none"],
+  eligibility: "show_all",
   priorities: ["poi"],
   ...overrides,
 });
+
+function mustWeights(value: ReturnType<typeof applyEmphasis>) {
+  assert.ok(value, "expected authoritative preset weights");
+  return value;
+}
 
 describe("deriveSetup", () => {
   test("carries the use case through as the preset", () => {
@@ -55,19 +60,17 @@ describe("deriveSetup", () => {
     assert.equal(deriveSetup(answers({ access: "highway" })).catchment, null);
   });
 
-  test("requirements switch on the eligibility filter and weight their own subscore", () => {
-    const setup = deriveSetup(answers({ requirements: ["no_flood", "zoning"] }));
+  test("the workable-only choice switches on the complete preset filter", () => {
+    const setup = deriveSetup(answers({ eligibility: "workable_only" }));
     assert.equal(setup.eligibleOnly, true);
-    assert.ok(setup.emphasis.flood > 2);
-    assert.ok(setup.emphasis.zoning > 2);
-    assert.equal(setup.emphasis.aqi, 1);
+    for (const key of SUBSCORE_KEYS) assert.equal(setup.emphasis[key], key === "poi" ? 2.52 : 1);
   });
 
-  test("\"no strict requirements\" does not filter anything out", () => {
+  test("show-all does not filter anything out", () => {
     // The filter hides ~99% of the grid under some presets, so it must not be
-    // switched on by an answer that declined to state a requirement. Isolated
+    // switched on by an answer that asks to see every location. Isolated
     // from the other questions so nothing else can be supplying the boost.
-    const setup = deriveSetup({ ...EMPTY_ANSWERS, kind: "retail", requirements: ["none"] });
+    const setup = deriveSetup({ ...EMPTY_ANSWERS, kind: "retail", eligibility: "show_all" });
     assert.equal(setup.eligibleOnly, false);
     for (const key of SUBSCORE_KEYS) assert.equal(setup.emphasis[key], 1);
   });
@@ -80,10 +83,10 @@ describe("deriveSetup", () => {
     assert.ok(both.emphasis.poi > purposeOnly.emphasis.poi);
   });
 
-  test("a requirement outweighs a mere ranking preference", () => {
-    const required = deriveSetup(answers({ requirements: ["no_flood"], priorities: [] }));
-    const preferred = deriveSetup(answers({ requirements: ["none"], priorities: ["flood"] }));
-    assert.ok(required.emphasis.flood > preferred.emphasis.flood);
+  test("eligibility changes filtering without secretly changing ranking weights", () => {
+    const filtered = deriveSetup(answers({ eligibility: "workable_only" }));
+    const all = deriveSetup(answers({ eligibility: "show_all" }));
+    assert.deepEqual(filtered.emphasis, all.emphasis);
   });
 
   test("only the first three priorities count", () => {
@@ -105,17 +108,17 @@ describe("deriveSetup", () => {
   });
 
   test("the summary describes the filter honestly, not as a new rule", () => {
-    const setup = deriveSetup(answers({ requirements: ["no_flood"] }));
-    const line = setup.summary.find((entry) => entry.includes("hard rules"));
+    const setup = deriveSetup(answers({ eligibility: "workable_only" }));
+    const line = setup.summary.find((entry) => entry.includes("hard rule"));
     // The engine cannot add constraints, so the wording has to promise the
     // filter it does apply rather than a rule it never created.
-    assert.ok(line?.includes("Hiding locations that fail"));
+    assert.ok(line?.includes("every hard rule"));
     assert.ok(!setup.summary.join(" ").includes("requirement added"));
   });
 
   test("every answer contributes a line the reader can check", () => {
     const setup = deriveSetup(
-      answers({ scope: "draw", access: "drive_catchment", requirements: ["zoning"] }),
+      answers({ scope: "draw", access: "drive_catchment", eligibility: "workable_only" }),
     );
     assert.ok(setup.summary.length >= 4);
     assert.ok(setup.summary.every((line) => line.length > 0));
@@ -130,7 +133,7 @@ describe("applyEmphasis", () => {
 
   test("scales the preset's own weights and normalises to a share", () => {
     const baseline = { demographics: 0.28, transport: 0.12, poi: 0.3, zoning: 0.14, flood: 0.1, aqi: 0.06 };
-    const weights = applyEmphasis(baseline, { ...flat, poi: 2 });
+    const weights = mustWeights(applyEmphasis(baseline, { ...flat, poi: 2 }));
     const total = SUBSCORE_KEYS.reduce((sum, key) => sum + (weights[key] ?? 0), 0);
     assert.ok(Math.abs(total - 1) < 0.01);
     // POI doubled against a fixed field, so its share has to rise.
@@ -140,18 +143,13 @@ describe("applyEmphasis", () => {
 
   test("preserves the preset's shape when nothing is emphasised", () => {
     const baseline = { demographics: 0.5, transport: 0.5 };
-    const weights = applyEmphasis(baseline, flat);
+    const weights = mustWeights(applyEmphasis(baseline, flat));
     assert.equal(weights.demographics, 0.5);
     assert.equal(weights.transport, 0.5);
   });
 
-  test("falls back to the emphasis alone when the preset has not loaded", () => {
-    // A cold sidecar is exactly when someone is answering these questions.
-    // Returning all-zero weights would hand them an unweighted map.
-    const weights = applyEmphasis({}, { ...flat, flood: 3 });
-    const total = SUBSCORE_KEYS.reduce((sum, key) => sum + (weights[key] ?? 0), 0);
-    assert.ok(Math.abs(total - 1) < 0.01);
-    assert.ok((weights.flood ?? 0) > (weights.aqi ?? 0));
+  test("refuses to invent weights before the authoritative preset loads", () => {
+    assert.equal(applyEmphasis({}, { ...flat, flood: 3 }), null);
   });
 
   test("a named priority is never left below the floor by a lopsided preset", () => {
@@ -163,15 +161,19 @@ describe("applyEmphasis", () => {
     const baseline = { demographics: 0.06, transport: 0.28, poi: 0.22, zoning: 0.36, flood: 0.06, aqi: 0.02 };
     const emphasis = { ...flat, demographics: 1.8, transport: 3.24, poi: 1.8 };
 
-    const unfloored = applyEmphasis(baseline, emphasis);
+    const unfloored = mustWeights(applyEmphasis(baseline, emphasis));
     assert.ok((unfloored.demographics ?? 0) < 0.06, "precondition: it really does shrink");
 
-    const floored = applyEmphasis(baseline, emphasis, ["demographics", "transport", "poi"]);
+    const floored = mustWeights(
+      applyEmphasis(baseline, emphasis, ["demographics", "transport", "poi"]),
+    );
     assert.ok((floored.demographics ?? 0) >= 0.1);
   });
 
   test("flooring keeps the weights a normalised share", () => {
-    const floored = applyEmphasis({ aqi: 0.02, zoning: 0.9 }, flat, ["aqi", "flood", "demographics"]);
+    const floored = mustWeights(
+      applyEmphasis({ aqi: 0.02, zoning: 0.9 }, flat, ["aqi", "flood", "demographics"]),
+    );
     const total = SUBSCORE_KEYS.reduce((sum, key) => sum + (floored[key] ?? 0), 0);
     assert.ok(Math.abs(total - 1) < 0.01, `total was ${total}`);
   });
@@ -180,21 +182,19 @@ describe("applyEmphasis", () => {
     // The floor takes room from the rest, but which of the rest matters most is
     // still the preset's call, not the questionnaire's.
     const baseline = { demographics: 0.05, zoning: 0.4, poi: 0.3, transport: 0.2, flood: 0.04, aqi: 0.01 };
-    const floored = applyEmphasis(baseline, flat, ["demographics"]);
+    const floored = mustWeights(applyEmphasis(baseline, flat, ["demographics"]));
     assert.ok((floored.zoning ?? 0) > (floored.poi ?? 0));
     assert.ok((floored.poi ?? 0) > (floored.transport ?? 0));
     assert.ok((floored.flood ?? 0) > (floored.aqi ?? 0));
   });
 
-  test("requirements are emphasised but not floored", () => {
-    // Question five is enforced by the eligibility filter, so it does not need
-    // to buy ranking weight as well; only question six names ranking priorities.
-    const setup = deriveSetup(answers({ requirements: ["no_flood"], priorities: [] }));
+  test("eligibility never buys ranking weight", () => {
+    const setup = deriveSetup(answers({ eligibility: "workable_only", priorities: [] }));
     assert.deepEqual(setup.floored, []);
   });
 
   test("never emits a weight the scorer would reject", () => {
-    const weights = applyEmphasis({ poi: 0.4 }, { ...flat, poi: 5 });
+    const weights = mustWeights(applyEmphasis({ poi: 0.4 }, { ...flat, poi: 5 }));
     for (const key of SUBSCORE_KEYS) {
       const value = weights[key] ?? 0;
       assert.ok(Number.isFinite(value) && value >= 0, `${key} = ${value}`);
@@ -207,7 +207,7 @@ describe("isComplete", () => {
     assert.equal(isComplete(answers()), true);
     assert.equal(isComplete(EMPTY_ANSWERS), false);
     assert.equal(isComplete(answers({ purpose: null })), false);
-    assert.equal(isComplete(answers({ requirements: [] })), false);
+    assert.equal(isComplete(answers({ eligibility: null })), false);
     assert.equal(isComplete(answers({ priorities: [] })), false);
   });
 });
@@ -261,20 +261,24 @@ describe("applying a completed questionnaire to the map", () => {
       purpose: "regional",
       scope: "draw",
       access: "drive_catchment",
-      requirements: ["no_flood"],
+      eligibility: "workable_only",
       priorities: ["demographics", "transport", "poi"],
     };
 
     const revisionBefore = useMapStore.getState().setupRevision;
 
     const setup = deriveSetup(completed);
-    const weights = applyEmphasis(sidecarWarehouse, setup.emphasis, setup.floored);
+    const weights = mustWeights(applyEmphasis(sidecarWarehouse, setup.emphasis, setup.floored));
     const store = useMapStore.getState();
-    store.applyProjectSetup(setup.preset, weights);
-    store.setEligibleOnly(setup.eligibleOnly);
-    store.setCatchmentOn(setup.catchment !== null);
-    if (setup.catchment) store.setCatchmentMode(setup.catchment.mode);
-    store.setDrawMode(setup.startDrawing ? "polygon" : null);
+    store.applyProjectSetup(setup.preset, weights, {
+      eligibleOnly: setup.eligibleOnly,
+      catchment: {
+        enabled: setup.catchment !== null,
+        mode: setup.catchment?.mode ?? "car",
+        minutes: setup.catchment?.minutes ?? 20,
+      },
+      searchScope: setup.startDrawing ? "draw" : "city",
+    });
 
     const after = useMapStore.getState();
     assert.equal(after.preset, "warehouse", "question one sets the use case");
@@ -295,5 +299,35 @@ describe("applying a completed questionnaire to the map", () => {
     // Loading a configuration is not a user edit, so it must not look like one
     // to the write-back that persists slider changes.
     assert.equal(after.setupRevision, revisionBefore);
+  });
+
+  test("a saved project's map settings restore as one non-user update", async () => {
+    const { useMapStore } = await import("@/stores/map-store");
+    const store = useMapStore.getState();
+    const revisionBefore = store.setupRevision;
+
+    store.applyProjectSetup("retail", { poi: 0.6, demographics: 0.4 }, {
+      eligibleOnly: true,
+      catchment: { enabled: true, mode: "foot", minutes: 10 },
+      searchScope: "draw",
+      studyArea: {
+        kind: "radius",
+        center: [-97.7431, 30.2672],
+        radiusMeters: 2_500,
+      },
+    });
+
+    const restored = useMapStore.getState();
+    assert.equal(restored.eligibleOnly, true);
+    assert.equal(restored.catchmentOn, true);
+    assert.equal(restored.catchmentMode, "foot");
+    assert.equal(restored.catchmentMinutes, 10);
+    assert.deepEqual(restored.studyArea, {
+      kind: "radius",
+      center: [-97.7431, 30.2672],
+      radiusMeters: 2_500,
+    });
+    assert.equal(restored.drawMode, null, "a saved shape should not reopen an empty draw tool");
+    assert.equal(restored.setupRevision, revisionBefore);
   });
 });

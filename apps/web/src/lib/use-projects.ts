@@ -66,12 +66,13 @@ export function useProjects() {
     toast.error(error instanceof Error ? error.message : "Something went wrong");
   };
 
-  /** Hands the map over to a project's use case and priorities. */
+  /** Hands the map over to the project's complete persisted configuration. */
   const openProject = (project: Project) => {
     setActiveProjectId(project.id);
     applyProjectSetup(
       project.preset as PresetName,
       toWeights(project.weights as Record<string, number>),
+      project.mapSettings,
     );
   };
 

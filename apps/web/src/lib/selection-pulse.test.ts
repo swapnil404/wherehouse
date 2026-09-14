@@ -4,6 +4,7 @@ import { cellToBoundary, cellToLatLng, latLngToCell } from "h3-js";
 
 import { FOCUS_LINE, FOCUS_RGB } from "./focus-mark";
 import {
+  PULSE_DURATION_MS,
   PULSE_PERIOD_MS,
   RING_COLOR,
   RING_WIDTH,
@@ -14,6 +15,11 @@ import {
 const CELL = latLngToCell(30.2672, -97.7431, 8);
 
 describe("pulseFrame", () => {
+  test("the complete beacon ends before persistent-motion controls are required", () => {
+    assert.equal(PULSE_DURATION_MS, PULSE_PERIOD_MS * 2);
+    assert.ok(PULSE_DURATION_MS < 5_000);
+  });
+
   test("starts at the cell's own size and full strength", () => {
     const frame = pulseFrame(0);
     assert.equal(frame.scale, 1);
@@ -28,7 +34,7 @@ describe("pulseFrame", () => {
     }
   });
 
-  test("loops forever instead of expiring", () => {
+  test("wraps cleanly for the second ring", () => {
     // The beacon runs for as long as a cell is selected, so an elapsed time an hour
     // in has to produce the same ring as the first frame rather than a ring
     // scaled off the edge of the map or an alpha stuck at zero.

@@ -180,6 +180,17 @@ export interface SelectionState {
 
 export type ReachabilityMode = "car" | "foot";
 
+export interface ProjectMapSettings {
+  eligibleOnly?: boolean;
+  catchment?: {
+    enabled: boolean;
+    mode: ReachabilityMode;
+    minutes: number;
+  };
+  searchScope?: "city" | "draw";
+  studyArea?: StudyArea | null;
+}
+
 interface MapStore {
   layers: Record<LayerId, LayerState>;
   preset: PresetName;
@@ -296,11 +307,11 @@ interface MapStore {
    */
   gridMeasure: GridMeasure;
   /**
-   * Counts *user-initiated* changes to the use case and priorities.
+   * Counts *user-initiated* changes to persisted project configuration.
    *
-   * Bumped by `setPreset`, `setWeight` and `resetWeights`, and deliberately not
-   * by `applyProjectSetup`. Loading a project and editing one look identical
-   * from the outside — both leave `preset` and `customWeights` holding new
+   * Bumped by the preset, weight, eligibility, reach, and study-area actions,
+   * and deliberately not by `applyProjectSetup`. Loading a project and editing
+   * one look identical from the outside — both leave the same map fields holding new
    * values — and telling them apart by watching those values means inferring
    * intent from render timing, which does not work: effects within a commit
    * still observe the previous render's state, so at the moment a project is
@@ -325,8 +336,12 @@ interface MapStore {
   toggleLayer: (id: LayerId) => void;
   setLayerOpacity: (id: LayerId, opacity: number) => void;
   setPreset: (preset: PresetName) => void;
-  /** Restores a saved project's use case and priorities in one update. */
-  applyProjectSetup: (preset: PresetName, weights: Weights) => void;
+  /** Restores every saved project setting in one non-user update. */
+  applyProjectSetup: (
+    preset: PresetName,
+    weights: Weights,
+    mapSettings?: ProjectMapSettings,
+  ) => void;
   setEligibleOnly: (eligibleOnly: boolean) => void;
   setHeatmapStats: (stats: HeatmapStats | null) => void;
   setHotspotStats: (stats: HotspotStats | null) => void;
@@ -422,23 +437,39 @@ export const useMapStore = create<MapStore>((set) => ({
   // project that differs from the current map by weights alone leaves the open
   // selection and the shortlist alone, exactly as dragging a slider does, since
   // both re-score from cached subscores without a refetch.
-  applyProjectSetup: (preset, weights) =>
+  applyProjectSetup: (preset, weights, mapSettings = {}) =>
     set((state) => {
       const customWeights = Object.keys(weights).length > 0 ? weights : null;
-      if (state.preset === preset) return { customWeights };
-      return {
-        preset,
+      const common = {
         customWeights,
+        eligibleOnly: mapSettings.eligibleOnly ?? false,
+        catchmentOn: mapSettings.catchment?.enabled ?? false,
+        catchmentMode: mapSettings.catchment?.mode ?? "car",
+        catchmentMinutes: mapSettings.catchment?.minutes ?? 20,
+        drawMode:
+          mapSettings.searchScope === "draw" && !mapSettings.studyArea
+            ? "polygon" as const
+            : null,
+        studyArea: mapSettings.studyArea ?? null,
+        studyAreaSites: null,
+        studyAreaScoreStatus: {
+          pending: mapSettings.studyArea != null,
+          error: null,
+        },
+      };
+      if (state.preset === preset) return common;
+      return {
+        ...common,
+        preset,
         hotspotStats: null,
         rankedCells: null,
         selection: null,
         selectionOrigin: null,
         comparisonSites: [],
-        studyAreaSites: null,
-        studyAreaScoreStatus: { pending: false, error: null },
       };
     }),
-  setEligibleOnly: (eligibleOnly) => set({ eligibleOnly }),
+  setEligibleOnly: (eligibleOnly) =>
+    set((state) => ({ eligibleOnly, setupRevision: state.setupRevision + 1 })),
   setWeight: (key, value, base) =>
     set((state) => ({
       customWeights: { ...(state.customWeights ?? base), [key]: value },
@@ -461,10 +492,16 @@ export const useMapStore = create<MapStore>((set) => ({
   clearComparisonSites: () => set({ comparisonSites: [] }),
   setStudyAreaScores: (studyAreaSites, studyAreaScoreStatus) =>
     set({ studyAreaSites, studyAreaScoreStatus }),
-  setCatchmentOn: (catchmentOn) => set({ catchmentOn }),
+  setCatchmentOn: (catchmentOn) =>
+    set((state) => ({ catchmentOn, setupRevision: state.setupRevision + 1 })),
   setCatchmentMode: (catchmentMode) =>
-    set({ catchmentMode, catchmentMinutes: 20 }),
-  setCatchmentMinutes: (catchmentMinutes) => set({ catchmentMinutes }),
+    set((state) => ({
+      catchmentMode,
+      catchmentMinutes: 20,
+      setupRevision: state.setupRevision + 1,
+    })),
+  setCatchmentMinutes: (catchmentMinutes) =>
+    set((state) => ({ catchmentMinutes, setupRevision: state.setupRevision + 1 })),
   // Does *not* clear `heatmapStats`, unlike the preset and hotspot setters.
   // That object carries the grid analytics the score panel's waterfall and
   // percentile grade are built from, and none of that depends on which ramp
@@ -475,16 +512,17 @@ export const useMapStore = create<MapStore>((set) => ({
   // to be replaced: two boundaries on the map, one of which is about to be
   // discarded, cannot be told apart while the second is half drawn.
   setDrawMode: (drawMode) =>
-    set({
+    set((state) => ({
       drawMode,
       studyArea: null,
       studyAreaSites: null,
       studyAreaScoreStatus: { pending: false, error: null },
-    }),
+      setupRevision: state.setupRevision + 1,
+    })),
   // Disarms the tool in the same update that commits the shape, so the canvas
   // cannot land a finished area and still be collecting vertices for it.
   setStudyArea: (studyArea) =>
-    set({
+    set((state) => ({
       studyArea,
       drawMode: null,
       studyAreaSites: null,
@@ -492,7 +530,8 @@ export const useMapStore = create<MapStore>((set) => ({
         pending: studyArea !== null,
         error: null,
       },
-    }),
+      setupRevision: state.setupRevision + 1,
+    })),
   focusCell: (pendingFocusH3) => set({ pendingFocusH3, selectionOrigin: "list" }),
   setSelectionOrigin: (selectionOrigin) => set({ selectionOrigin }),
   clearPendingFocus: () => set({ pendingFocusH3: null }),

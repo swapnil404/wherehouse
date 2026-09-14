@@ -17,13 +17,10 @@ import {
  * one language. So nothing here invents a subscore, and nothing here invents a
  * constraint.
  *
- * That bounds question five in particular. "What must a suitable location
- * satisfy" reads like it adds rules, and it cannot: the hard constraints belong
- * to the preset and are evaluated in Python. What it does instead is switch on
- * the eligibility filter — which hides every cell failing the preset's *own*
- * hard rules — and lean the weights hard toward the named concern. That is the
- * closest this engine gets to "must", and the confirmation screen says so in
- * those terms rather than promising a rule that was never created.
+ * Question five therefore asks about the one real filtering choice the engine
+ * supports: show only cells passing every rule in the chosen preset, or show
+ * every cell and explain failures. It does not pretend that individual rules
+ * can be enabled from the browser.
  *
  * **The numbers below are editorial, not derived.** They are one defensible
  * reading of each answer, not an output of the model, and they are written as
@@ -92,16 +89,11 @@ export const ACCESS_OPTIONS: readonly Option<AccessKey>[] = [
   { value: "none", label: "No strong preference" },
 ] as const;
 
-export type RequirementKey =
-  | "no_flood" | "zoning" | "near_highway" | "population" | "low_competition" | "none";
+export type EligibilityKey = "workable_only" | "show_all";
 
-export const REQUIREMENT_OPTIONS: readonly Option<RequirementKey>[] = [
-  { value: "no_flood", label: "Outside flood-risk areas" },
-  { value: "zoning", label: "Industrial or commercial zoning" },
-  { value: "near_highway", label: "Close to a highway" },
-  { value: "population", label: "Strong surrounding population" },
-  { value: "low_competition", label: "Low nearby competition" },
-  { value: "none", label: "No strict requirements" },
+export const ELIGIBILITY_OPTIONS: readonly Option<EligibilityKey>[] = [
+  { value: "workable_only", label: "Only locations that pass every preset rule" },
+  { value: "show_all", label: "Every location, with failed rules clearly marked" },
 ] as const;
 
 /** Question six reuses the scoring dimensions directly, under their plain labels. */
@@ -115,7 +107,7 @@ export interface Answers {
   purpose: PurposeKey | null;
   scope: ScopeKey | null;
   access: AccessKey | null;
-  requirements: readonly RequirementKey[];
+  eligibility: EligibilityKey | null;
   priorities: readonly SubscoreKey[];
 }
 
@@ -124,22 +116,11 @@ export const EMPTY_ANSWERS: Answers = {
   purpose: null,
   scope: null,
   access: null,
-  requirements: [],
+  eligibility: null,
   priorities: [],
 };
 
 const PRIORITY_BOOST = 1.8;
-/** Above `PRIORITY_BOOST`: a stated requirement is a stronger claim than a ranking preference. */
-const REQUIREMENT_BOOST = 2.2;
-
-const REQUIREMENT_SUBSCORE: Record<Exclude<RequirementKey, "none">, SubscoreKey> = {
-  no_flood: "flood",
-  zoning: "zoning",
-  near_highway: "transport",
-  population: "demographics",
-  low_competition: "poi",
-};
-
 /** What each use of the building implies, within the preset that already fits it. */
 const PURPOSE_EMPHASIS: Record<PurposeKey, Partial<Record<SubscoreKey, number>>> = {
   // Last-mile wants to be near the people it delivers to; regional wants the road.
@@ -182,7 +163,7 @@ export interface DerivedSetup {
    * floor in the final weights. See `PRIORITY_FLOOR`.
    */
   floored: readonly SubscoreKey[];
-  /** Hide cells failing the preset's hard rules. True when any requirement was named. */
+  /** Hide cells failing any of the preset's fixed hard rules. */
   eligibleOnly: boolean;
   catchment: { mode: ReachabilityMode; minutes: number } | null;
   /** Arm the polygon tool on arrival, because the reader asked to pick an area. */
@@ -232,21 +213,12 @@ export function deriveSetup(answers: Answers): DerivedSetup {
     if (label) summary.push(`Weighted toward ${label.toLowerCase()}`);
   }
 
-  const requirements = answers.requirements.filter(
-    (value): value is Exclude<RequirementKey, "none"> => value !== "none",
+  const eligibleOnly = answers.eligibility === "workable_only";
+  summary.push(
+    eligibleOnly
+      ? "Showing only locations that pass every hard rule in this preset"
+      : "Showing every location and marking any failed hard rules",
   );
-  for (const requirement of requirements) {
-    emphasis[REQUIREMENT_SUBSCORE[requirement]] *= REQUIREMENT_BOOST;
-  }
-  if (requirements.length > 0) {
-    summary.push(
-      "Hiding locations that fail this use case's hard rules, and weighting heavily toward: "
-      + requirements
-        .map((r) => REQUIREMENT_OPTIONS.find((o) => o.value === r)?.label.toLowerCase())
-        .filter(Boolean)
-        .join(", "),
-    );
-  }
 
   for (const priority of answers.priorities.slice(0, MAX_PRIORITIES)) {
     emphasis[priority] *= PRIORITY_BOOST;
@@ -269,7 +241,7 @@ export function deriveSetup(answers: Answers): DerivedSetup {
     preset,
     emphasis,
     floored: answers.priorities.slice(0, MAX_PRIORITIES),
-    eligibleOnly: requirements.length > 0,
+    eligibleOnly,
     catchment,
     startDrawing,
     summary,
@@ -302,23 +274,21 @@ const PRIORITY_FLOOR = 0.1;
  * serves. `compositeScore` divides by the total anyway, so this is legibility
  * rather than arithmetic — the sliders show a share, not a magnitude.
  *
- * Falls back to the emphasis alone when there is no baseline to scale. That
- * happens when the sidecar has not served `/v1/presets` yet, which on a cold
- * start is exactly when someone is filling in this questionnaire; answering six
- * questions and getting an unweighted map would be the worse failure.
+ * Returns `null` until the authoritative baseline exists. Inventing a fallback
+ * would make identical answers produce different projects depending on whether
+ * the sidecar happened to be warm.
  */
 export function applyEmphasis(
   baseline: Weights,
   emphasis: Record<SubscoreKey, number>,
   floored: readonly SubscoreKey[] = [],
-): Weights {
+): Weights | null {
   const scaled = SUBSCORE_KEYS.map((key) => (baseline[key] ?? 0) * emphasis[key]);
   const total = scaled.reduce((sum, value) => sum + value, 0);
-  const source = total > 0 ? scaled : SUBSCORE_KEYS.map((key) => emphasis[key]);
-  const divisor = total > 0 ? total : source.reduce((sum, value) => sum + value, 0);
+  if (total <= 0) return null;
 
   const shares = new Map<SubscoreKey, number>(
-    SUBSCORE_KEYS.map((key, index) => [key, source[index] / divisor]),
+    SUBSCORE_KEYS.map((key, index) => [key, scaled[index] / total]),
   );
 
   // Raise the named priorities to the floor, then shrink everything else into
@@ -352,7 +322,7 @@ export function isComplete(answers: Answers): boolean {
     && answers.purpose !== null
     && answers.scope !== null
     && answers.access !== null
-    && answers.requirements.length > 0
+    && answers.eligibility !== null
     && answers.priorities.length > 0
   );
 }

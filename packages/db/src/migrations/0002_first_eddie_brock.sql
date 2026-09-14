@@ -1,0 +1,1 @@
+ALTER TABLE "project" ADD COLUMN "map_settings" jsonb DEFAULT '{}'::jsonb NOT NULL;

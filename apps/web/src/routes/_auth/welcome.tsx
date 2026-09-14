@@ -2,7 +2,6 @@ import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { ArrowRightIcon, CompassIcon, ListChecksIcon } from "lucide-react";
 import { useState } from "react";
-import { toast } from "sonner";
 
 import OnboardingWizard from "@/components/onboarding-wizard";
 import { text } from "@/components/panel-styles";
@@ -10,7 +9,7 @@ import { authClient } from "@/lib/auth-client";
 import type { Weights } from "@/lib/cells";
 import { deriveSetup, projectNameFor, type Answers } from "@/lib/onboarding";
 import { useProjects } from "@/lib/use-projects";
-import { useMapStore } from "@/stores/map-store";
+import { useMapStore, type ProjectMapSettings } from "@/stores/map-store";
 import { useTRPC } from "@/utils/trpc";
 
 export const Route = createFileRoute("/_auth/welcome")({
@@ -37,10 +36,6 @@ function RouteComponent() {
   const [asking, setAsking] = useState(false);
 
   const applyProjectSetup = useMapStore((state) => state.applyProjectSetup);
-  const setEligibleOnly = useMapStore((state) => state.setEligibleOnly);
-  const setCatchmentOn = useMapStore((state) => state.setCatchmentOn);
-  const setCatchmentMode = useMapStore((state) => state.setCatchmentMode);
-  const setDrawMode = useMapStore((state) => state.setDrawMode);
 
   /**
    * The sidecar's own weights, which the answers scale rather than replace.
@@ -60,6 +55,15 @@ function RouteComponent() {
 
   const handleComplete = async (answers: Answers, weights: Weights) => {
     const setup = deriveSetup(answers);
+    const mapSettings: ProjectMapSettings = {
+      eligibleOnly: setup.eligibleOnly,
+      catchment: {
+        enabled: setup.catchment !== null,
+        mode: setup.catchment?.mode ?? "car",
+        minutes: setup.catchment?.minutes ?? 20,
+      },
+      searchScope: setup.startDrawing ? "draw" : "city",
+    };
 
     /**
      * The map is configured here and now, from the answers, before anything is
@@ -74,11 +78,7 @@ function RouteComponent() {
      * saying why. The persistence below is now a separate concern that is
      * allowed to fail on its own.
      */
-    applyProjectSetup(setup.preset, weights);
-    setEligibleOnly(setup.eligibleOnly);
-    setCatchmentOn(setup.catchment !== null);
-    if (setup.catchment) setCatchmentMode(setup.catchment.mode);
-    setDrawMode(setup.startDrawing ? "polygon" : null);
+    applyProjectSetup(setup.preset, weights, mapSettings);
 
     // Persistence, so the answers survive a reload as a workspace. A failure
     // here costs the saved project, not the configuration the reader just
@@ -89,11 +89,11 @@ function RouteComponent() {
         name: projectNameFor(answers),
         preset: setup.preset,
         weights: weights as Record<string, number>,
+        mapSettings,
       });
     } catch {
-      toast.error("Could not save this as a project", {
-        description: "The map is set up from your answers, but it will not be here after a reload.",
-      });
+      // `useProjects` already reports the write failure. The local setup above
+      // still opens, so a database outage does not discard six answers.
     }
 
     navigate({ to: "/dashboard" });
@@ -121,6 +121,8 @@ function RouteComponent() {
               isSubmitting={createProject.isPending}
               onCancel={() => navigate({ to: "/dashboard" })}
               onComplete={handleComplete}
+              onRetryPreset={() => void presets.refetch()}
+              presetError={presets.isError}
               presetWeights={presets.data ?? null}
             />
           ) : (

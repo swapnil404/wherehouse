@@ -6,12 +6,12 @@ import {
   ACCESS_OPTIONS,
   applyEmphasis,
   deriveSetup,
+  ELIGIBILITY_OPTIONS,
   EMPTY_ANSWERS,
   LOCATION_KINDS,
   MAX_PRIORITIES,
   PRIORITY_OPTIONS,
   PURPOSES,
-  REQUIREMENT_OPTIONS,
   SCOPES,
   type Answers,
   type Option,
@@ -30,14 +30,14 @@ import { panelSurface, text } from "./panel-styles";
  * opens.
  */
 
-type StepId = "kind" | "purpose" | "scope" | "access" | "requirements" | "priorities" | "summary";
+type StepId = "kind" | "purpose" | "scope" | "access" | "eligibility" | "priorities" | "summary";
 
 const STEPS: readonly StepId[] = [
   "kind",
   "purpose",
   "scope",
   "access",
-  "requirements",
+  "eligibility",
   "priorities",
   "summary",
 ] as const;
@@ -50,9 +50,9 @@ const PROMPTS: Record<Exclude<StepId, "summary">, { title: string; hint?: string
   purpose: { title: "What will this location mainly support?" },
   scope: { title: "Which area should we search?" },
   access: { title: "What kind of access matters most?" },
-  requirements: {
-    title: "What must a suitable location satisfy?",
-    hint: "Pick as many as apply. These hide locations that fail this use case's hard rules and weight the score toward what you name.",
+  eligibility: {
+    title: "Which locations should appear in your results?",
+    hint: "Each preset has fixed rules for flood risk, access, zoning, and site suitability.",
   },
   priorities: {
     title: "What should Wherehouse prioritize when ranking sites?",
@@ -62,15 +62,19 @@ const PROMPTS: Record<Exclude<StepId, "summary">, { title: string; hint?: string
 
 export default function OnboardingWizard({
   presetWeights,
+  presetError,
   isSubmitting,
   onComplete,
   onCancel,
+  onRetryPreset,
 }: {
   /** The sidecar's own weights for the chosen use case, when they have arrived. */
   presetWeights: Partial<Record<PresetName, Weights>> | null;
+  presetError: boolean;
   isSubmitting: boolean;
   onComplete: (answers: Answers, weights: Weights) => void;
   onCancel: () => void;
+  onRetryPreset: () => void;
 }) {
   const [stepIndex, setStepIndex] = useState(0);
   const [answers, setAnswers] = useState<Answers>(EMPTY_ANSWERS);
@@ -88,28 +92,11 @@ export default function OnboardingWizard({
       case "purpose": return answers.purpose !== null;
       case "scope": return answers.scope !== null;
       case "access": return answers.access !== null;
-      case "requirements": return answers.requirements.length > 0;
+      case "eligibility": return answers.eligibility !== null;
       case "priorities": return answers.priorities.length > 0;
       case "summary": return true;
     }
   })();
-
-  const toggleRequirement = (value: (typeof REQUIREMENT_OPTIONS)[number]["value"]) => {
-    setAnswers((current) => {
-      // "No strict requirements" contradicts every other answer here, so the
-      // two can never be held at once in either direction.
-      if (value === "none") {
-        return { ...current, requirements: current.requirements.includes("none") ? [] : ["none"] };
-      }
-      const without = current.requirements.filter((entry) => entry !== "none");
-      return {
-        ...current,
-        requirements: without.includes(value)
-          ? without.filter((entry) => entry !== value)
-          : [...without, value],
-      };
-    });
-  };
 
   const togglePriority = (value: (typeof PRIORITY_OPTIONS)[number]["value"]) => {
     setAnswers((current) => {
@@ -147,7 +134,12 @@ export default function OnboardingWizard({
 
       <div className="max-h-[min(30rem,calc(100vh-18rem))] overflow-y-auto p-5">
         {step === "summary" ? (
-          <Summary lines={derived.summary} weights={weights} />
+          <Summary
+            lines={derived.summary}
+            onRetryPreset={onRetryPreset}
+            presetError={presetError}
+            weights={weights}
+          />
         ) : (
           <>
             <h2 className="font-display text-base font-semibold">{PROMPTS[step].title}</h2>
@@ -200,11 +192,14 @@ export default function OnboardingWizard({
                 />
               ) : null}
 
-              {step === "requirements" ? (
-                <MultiSelect
-                  onToggle={toggleRequirement}
-                  options={REQUIREMENT_OPTIONS}
-                  selected={answers.requirements}
+              {step === "eligibility" ? (
+                <SingleSelect
+                  label={PROMPTS.eligibility.title}
+                  onSelect={(eligibility) =>
+                    setAnswers((current) => ({ ...current, eligibility }))
+                  }
+                  options={ELIGIBILITY_OPTIONS}
+                  selected={answers.eligibility}
                 />
               ) : null}
 
@@ -235,11 +230,13 @@ export default function OnboardingWizard({
         {step === "summary" ? (
           <button
             className="flex items-center gap-2 rounded-md bg-accent px-4 py-2 text-xs font-medium text-accent-foreground transition-colors hover:bg-accent/90 disabled:opacity-50"
-            disabled={isSubmitting}
-            onClick={() => onComplete(answers, weights)}
+            disabled={isSubmitting || weights === null}
+            onClick={() => {
+              if (weights) onComplete(answers, weights);
+            }}
             type="button"
           >
-            {isSubmitting ? "Setting up…" : "Open the map"}
+            {isSubmitting ? "Setting up…" : weights ? "Open the map" : "Waiting for scoring…"}
             <ArrowRightIcon className="size-3.5" aria-hidden />
           </button>
         ) : (
@@ -343,14 +340,45 @@ function MultiSelect<T extends string>({
   );
 }
 
-function Summary({ lines, weights }: { lines: readonly string[]; weights: Weights }) {
+function Summary({
+  lines,
+  weights,
+  presetError,
+  onRetryPreset,
+}: {
+  lines: readonly string[];
+  weights: Weights | null;
+  presetError: boolean;
+  onRetryPreset: () => void;
+}) {
+  if (!weights) {
+    return (
+      <div className="py-8 text-center">
+        <h2 className="font-display text-base font-semibold">Preparing your scoring model</h2>
+        <p className={`mx-auto mt-2 max-w-sm ${text.hint}`}>
+          {presetError
+            ? "The scoring service did not return the official preset weights."
+            : "Loading the official preset weights so your answers always produce the same result."}
+        </p>
+        {presetError ? (
+          <button
+            className="mt-4 rounded-md border border-white/15 px-3 py-2 text-xs text-foreground transition-colors hover:bg-white/5"
+            onClick={onRetryPreset}
+            type="button"
+          >
+            Try again
+          </button>
+        ) : null}
+      </div>
+    );
+  }
+
   const total = SUBSCORE_KEYS.reduce((sum, key) => sum + (weights[key] ?? 0), 0);
 
   return (
     <>
       <h2 className="font-display text-base font-semibold">
-        We&rsquo;ll use these answers to configure your project, scoring weights, and site
-        requirements.
+        We&rsquo;ll use these answers to configure your project, scoring weights, and map.
       </h2>
 
       {/* Real list markers rather than an icon per row. A column of accent

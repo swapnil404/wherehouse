@@ -2,6 +2,7 @@ import { and, desc, eq, sql } from "drizzle-orm";
 
 import { createDb } from "./index";
 import { project, savedSite } from "./schema";
+import type { ProjectMapSettings } from "./schema/app";
 
 export const MAX_SAVED_SITES_PER_PROJECT = 5;
 
@@ -31,6 +32,7 @@ export interface CreateProjectInput {
   description?: string | null;
   preset: string;
   weights: Record<string, number>;
+  mapSettings?: ProjectMapSettings;
 }
 
 export interface UpdateProjectInput {
@@ -38,6 +40,7 @@ export interface UpdateProjectInput {
   description?: string | null;
   preset?: string;
   weights?: Record<string, number>;
+  mapSettings?: ProjectMapSettings;
 }
 
 export interface CreateSavedSiteInput {

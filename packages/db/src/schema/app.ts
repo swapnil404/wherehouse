@@ -12,6 +12,19 @@ import {
 import { user } from "./auth";
 
 export type ProjectWeights = Record<string, number>;
+export interface ProjectMapSettings {
+  eligibleOnly?: boolean;
+  catchment?: {
+    enabled: boolean;
+    mode: "car" | "foot";
+    minutes: number;
+  };
+  searchScope?: "city" | "draw";
+  studyArea?:
+    | { kind: "polygon"; ring: [number, number][] }
+    | { kind: "radius"; center: [number, number]; radiusMeters: number }
+    | null;
+}
 export type ScoreSnapshot = Record<string, unknown>;
 
 export const project = pgTable(
@@ -25,6 +38,7 @@ export const project = pgTable(
     description: text("description"),
     preset: text("preset").notNull().default("warehouse"),
     weights: jsonb("weights").$type<ProjectWeights>().notNull().default({}),
+    mapSettings: jsonb("map_settings").$type<ProjectMapSettings>().notNull().default({}),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

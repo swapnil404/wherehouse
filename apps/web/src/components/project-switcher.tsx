@@ -29,9 +29,9 @@ import { useMapStore } from "@/stores/map-store";
  * Which workspace the session is in, and the only place the map and the active
  * project are kept in step.
  *
- * It lives in the header because a project silently supplies the preset and
- * weights the whole map is drawn from; somewhere less permanent and the reader
- * would have no standing answer to "why is this map showing retail".
+ * It lives in the header because a project supplies the preset, weights,
+ * filtering, reach, and study area the map is drawn from; somewhere less
+ * permanent and the reader would have no standing answer to what is on screen.
  *
  * Both directions of that synchronisation are owned here, and this component is
  * mounted exactly once, which is what makes a single owner possible. `useProjects`
@@ -69,7 +69,27 @@ export default function ProjectSwitcher() {
   const preset = useMapStore((state) => state.preset);
   const presets = useMapStore((state) => state.presets);
   const customWeights = useMapStore((state) => state.customWeights);
+  const eligibleOnly = useMapStore((state) => state.eligibleOnly);
+  const catchmentOn = useMapStore((state) => state.catchmentOn);
+  const catchmentMode = useMapStore((state) => state.catchmentMode);
+  const catchmentMinutes = useMapStore((state) => state.catchmentMinutes);
+  const drawMode = useMapStore((state) => state.drawMode);
+  const studyArea = useMapStore((state) => state.studyArea);
   const setupRevision = useMapStore((state) => state.setupRevision);
+
+  const mapSettings = useMemo(
+    () => ({
+      eligibleOnly,
+      catchment: {
+        enabled: catchmentOn,
+        mode: catchmentMode,
+        minutes: catchmentMinutes,
+      },
+      searchScope: (drawMode === "polygon" || studyArea ? "draw" : "city") as "draw" | "city",
+      studyArea,
+    }),
+    [eligibleOnly, catchmentOn, catchmentMode, catchmentMinutes, drawMode, studyArea],
+  );
 
   const [mode, setMode] = useState<Mode>("idle");
   /**
@@ -121,6 +141,7 @@ export default function ProjectSwitcher() {
         projectId: outgoing.id,
         preset,
         weights: (customWeights ?? {}) as Record<string, number>,
+        mapSettings,
       });
     }
 
@@ -129,7 +150,16 @@ export default function ProjectSwitcher() {
     // pending persistence until the user changes something from here.
     handledRevision.current = setupRevision;
     openProject(active);
-  }, [active, openProject, projects, preset, customWeights, setupRevision, updateProject]);
+  }, [
+    active,
+    openProject,
+    projects,
+    preset,
+    customWeights,
+    mapSettings,
+    setupRevision,
+    updateProject,
+  ]);
 
   /**
    * Map → project.
@@ -139,8 +169,8 @@ export default function ProjectSwitcher() {
    * so reopening it restores a configuration the user abandoned hours ago.
    */
   const mapSetup = useMemo(
-    () => JSON.stringify({ preset, weights: customWeights ?? {} }),
-    [preset, customWeights],
+    () => JSON.stringify({ preset, weights: customWeights ?? {}, mapSettings }),
+    [preset, customWeights, mapSettings],
   );
   // Purely a coalescing gate. The weight sliders fire on every pointer move, so
   // without it a single drag would be one round trip per pixel.
@@ -163,9 +193,16 @@ export default function ProjectSwitcher() {
     handledRevision.current = setupRevision;
 
     const weights = customWeights ?? {};
+    const storedSettings = active.mapSettings;
     if (
       preset === active.preset
       && sameWeights(toWeights(active.weights as Record<string, number>), weights)
+      && storedSettings.eligibleOnly === mapSettings.eligibleOnly
+      && storedSettings.catchment?.enabled === mapSettings.catchment.enabled
+      && storedSettings.catchment?.mode === mapSettings.catchment.mode
+      && storedSettings.catchment?.minutes === mapSettings.catchment.minutes
+      && (storedSettings.searchScope ?? "city") === mapSettings.searchScope
+      && JSON.stringify(storedSettings.studyArea ?? null) === JSON.stringify(mapSettings.studyArea)
     ) {
       return;
     }
@@ -178,8 +215,9 @@ export default function ProjectSwitcher() {
       // preset's current numbers would pin the project to today's values and
       // make an unmodified preset indistinguishable from a deliberate copy.
       weights: weights as Record<string, number>,
+      mapSettings,
     });
-  }, [active, preset, customWeights, setupRevision, settled, updateProject]);
+  }, [active, preset, customWeights, mapSettings, setupRevision, settled, updateProject]);
 
   if (isLoading) return <Skeleton className="h-8 w-40 rounded-md" />;
 
@@ -191,6 +229,7 @@ export default function ProjectSwitcher() {
       // the setup that prompted it.
       preset,
       weights: (customWeights ?? presets?.[preset] ?? {}) as Record<string, number>,
+      mapSettings,
     });
   };
 

@@ -22,6 +22,27 @@ const descriptionSchema = z.string().trim().max(500).nullable();
 const notesSchema = z.string().trim().max(2_000).nullable();
 const presetSchema = z.enum(["warehouse", "retail", "ev"]);
 const weightsSchema = z.record(z.string(), z.number().finite().nonnegative());
+const positionSchema = z.tuple([
+  z.number().min(-180).max(180),
+  z.number().min(-90).max(90),
+]);
+const mapSettingsSchema = z.object({
+  eligibleOnly: z.boolean().optional(),
+  catchment: z.object({
+    enabled: z.boolean(),
+    mode: z.enum(["car", "foot"]),
+    minutes: z.number().int().min(10).max(30),
+  }).optional(),
+  searchScope: z.enum(["city", "draw"]).optional(),
+  studyArea: z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("polygon"), ring: z.array(positionSchema).min(3).max(500) }),
+    z.object({
+      kind: z.literal("radius"),
+      center: positionSchema,
+      radiusMeters: z.number().positive().max(100_000),
+    }),
+  ]).nullable().optional(),
+});
 const h3Schema = z.string().regex(/^88[0-9a-f]{13}$/i).nullable();
 const scoreSnapshotSchema = z.record(z.string(), z.unknown());
 
@@ -54,6 +75,7 @@ export const projectsRouter = router({
       description: descriptionSchema.optional(),
       preset: presetSchema.default("warehouse"),
       weights: weightsSchema.default({}),
+      mapSettings: mapSettingsSchema.default({}),
     }))
     .mutation(({ ctx, input }) => createProject(ctx.session.user.id, input)),
 
@@ -64,6 +86,7 @@ export const projectsRouter = router({
       description: descriptionSchema.optional(),
       preset: presetSchema.optional(),
       weights: weightsSchema.optional(),
+      mapSettings: mapSettingsSchema.optional(),
     }).refine(
       ({ projectId: _projectId, ...updates }) => Object.keys(updates).length > 0,
       "Provide at least one field to update",
