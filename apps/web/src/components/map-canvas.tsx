@@ -8,6 +8,7 @@ import {
   MapPinIcon,
   PencilLineIcon,
   ScanIcon,
+  SquareIcon,
   TriangleAlertIcon,
 } from "lucide-react";
 import { cellToLatLng } from "h3-js";
@@ -245,13 +246,14 @@ export default function MapCanvas() {
    * bar is wanted bottom-centre. Rather than reimplement it, the control is
    * instantiated directly and its element appended here: `onAdd` returns the
    * DOM node and `onRemove` tears it down, which is the whole of the
-   * `IControl` contract. That keeps the parts worth keeping, notably the
-   * compass, the pitch visualisation and the buttons disabling themselves at
-   * the style's zoom limits, while this component owns the placement.
+   * `IControl` contract. That keeps the buttons disabling themselves at the
+   * style's zoom limits, while this component owns the placement and adds the
+   * plainly labelled tilt control beside them.
    */
   const zoomHostRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<MapboxOverlay | null>(null);
   const [deckAnchor, setDeckAnchor] = useState<DeckAnchor>(null);
+  const [isTilted, setIsTilted] = useState(false);
 
   const trpc = useTRPC();
   const preset = useMapStore((s) => s.preset);
@@ -672,8 +674,11 @@ export default function MapCanvas() {
 
     // Zoom goes bottom-centre instead, mounted into this component's own node
     // rather than one of MapLibre's four corner containers. See `zoomHostRef`.
-    const nav = new maplibregl.NavigationControl({ visualizePitch: true });
+    const nav = new maplibregl.NavigationControl({ showCompass: false });
     zoomHostRef.current?.appendChild(nav.onAdd(map));
+
+    const reportPitch = () => setIsTilted(map.getPitch() > 5);
+    map.on("pitchend", reportPitch);
 
     map.getCanvas().style.cursor = "crosshair";
 
@@ -904,6 +909,7 @@ export default function MapCanvas() {
       overlayRef.current = null;
       // Before `map.remove()`: the control detaches its own listeners from
       // the map, and doing that after the map is gone is a needless race.
+      map.off("pitchend", reportPitch);
       nav.onRemove();
       map.remove();
       mapRef.current = null;
@@ -1571,9 +1577,28 @@ export default function MapCanvas() {
         ) : null}
 
         {/* Last in the column, so the notices above stack on top of it rather
-            than landing on it. `index.css` lays the mounted control out
-            horizontally; MapLibre builds it as a vertical stack. */}
-        <div ref={zoomHostRef} className="wh-zoom-control" />
+            than landing on it. The native zoom buttons stay familiar; tilt is
+            explicit rather than hidden in an unlabeled compass gesture. */}
+        <div className="pointer-events-auto flex items-stretch gap-1.5">
+          <div ref={zoomHostRef} className="wh-zoom-control" />
+          <button
+            aria-label={isTilted ? "Return to overhead view" : "Tilt map"}
+            aria-pressed={isTilted}
+            className={`${panelPill} gap-1.5 px-2.5 font-medium text-foreground transition-colors hover:bg-black focus-visible:ring-1 focus-visible:ring-ring/50 focus-visible:outline-none`}
+            onClick={() => {
+              const map = mapRef.current;
+              if (!map) return;
+              map.easeTo({ pitch: map.getPitch() > 5 ? 0 : 45, duration: 450 });
+            }}
+            type="button"
+          >
+            <SquareIcon
+              className={`size-3 transition-transform ${isTilted ? "rotate-45" : "rotate-12"}`}
+              aria-hidden
+            />
+            {isTilted ? "Flat" : "Tilt"}
+          </button>
+        </div>
       </div>
 
     </div>

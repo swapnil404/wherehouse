@@ -18,8 +18,8 @@ import UserMenu from "./user-menu";
  */
 export default function Header() {
   return (
-    <header className="relative z-30 flex h-14 shrink-0 items-center border-b border-white/10 bg-black/95 px-3 shadow-[0_1px_24px_rgb(0_0_0/0.35)] backdrop-blur-xl sm:px-4">
-      <div className="flex min-w-0 flex-1 items-center gap-3">
+    <header className="relative z-30 flex h-12 shrink-0 items-center border-b border-white/10 bg-black/95 px-3 shadow-[0_1px_24px_rgb(0_0_0/0.35)] backdrop-blur-xl sm:px-4">
+      <div className="flex min-w-0 flex-1 items-center gap-4">
         {/* To the welcome page, not the map. The map is the screen you are
             almost certainly on when you can see this, so pointing the wordmark
             at it makes the app's one always-visible control a no-op. The
@@ -33,18 +33,12 @@ export default function Header() {
         </Link>
 
         <span className="hidden h-5 w-px bg-white/10 sm:block" aria-hidden />
-        <div className="hidden min-w-0 items-center gap-1.5 text-xs text-muted-foreground sm:flex">
+        <ProjectSwitcher />
+
+        <div className="ml-1 hidden min-w-0 items-center gap-1.5 text-xs text-muted-foreground md:flex">
           <MapPinIcon className="size-3.5 text-primary/80" aria-hidden />
           <span className="truncate">Austin, Texas</span>
-          <span className="text-white/20">/</span>
-          <span className="truncate text-foreground/75">Site intelligence</span>
         </div>
-
-        {/* Next to the location, not next to the account: a project supplies
-            the preset and weights the map is drawn from, so it belongs with
-            the other statements about what is on screen. */}
-        <span className="hidden h-5 w-px bg-white/10 sm:block" aria-hidden />
-        <ProjectSwitcher />
       </div>
 
       <UserMenu />

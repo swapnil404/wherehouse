@@ -1,7 +1,6 @@
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
@@ -19,7 +18,6 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { PRESET_LABELS, type PresetName } from "@/lib/cells";
 import { nextSequentialName, sameWeights, toWeights } from "@/lib/saved-sites";
 import { useDebouncedValue } from "@/lib/use-debounced-value";
 import { useProjects } from "@/lib/use-projects";
@@ -92,6 +90,7 @@ export default function ProjectSwitcher() {
   );
 
   const [mode, setMode] = useState<Mode>("idle");
+  const [actionProjectId, setActionProjectId] = useState<string | null>(null);
   /**
    * The rename field's text, seeded once when rename is picked.
    *
@@ -247,12 +246,14 @@ export default function ProjectSwitcher() {
     );
   }
 
-  if (mode === "renaming" && active) {
+  const actionProject = projects.find((project) => project.id === actionProjectId);
+
+  if (mode === "renaming" && actionProject) {
     const commit = () => {
       const name = nameDraft.trim();
       setMode("idle");
-      if (name && name !== active.name) {
-        updateProject.mutate({ projectId: active.id, name });
+      if (name && name !== actionProject.name) {
+        updateProject.mutate({ projectId: actionProject.id, name });
       }
     };
 
@@ -275,21 +276,21 @@ export default function ProjectSwitcher() {
     );
   }
 
-  if (mode === "confirmDelete" && active) {
-    const siteCount = active.savedSites.length;
+  if (mode === "confirmDelete" && actionProject) {
+    const siteCount = actionProject.savedSites.length;
     return (
       <div className={`${CHROME} border-destructive/40 bg-destructive/10`}>
         {/* Names the blast radius. Deleting a project cascades to its saved
             sites, so a bare "are you sure" would understate it. */}
         <span className="truncate text-muted-foreground">
-          Delete {active.name}
+          Delete {actionProject.name}
           {siteCount > 0 ? ` and its ${siteCount} site${siteCount === 1 ? "" : "s"}` : null}?
         </span>
         <button
           className="shrink-0 rounded-sm px-1.5 py-0.5 font-medium text-destructive transition-colors hover:bg-destructive/20"
           onClick={() => {
             setMode("idle");
-            deleteProject.mutate({ projectId: active.id });
+            deleteProject.mutate({ projectId: actionProject.id });
           }}
           type="button"
         >
@@ -338,14 +339,35 @@ export default function ProjectSwitcher() {
             Projects
           </DropdownMenuLabel>
           {projects.map((project) => (
-            <DropdownMenuRadioItem key={project.id} value={project.id}>
-              <span className="min-w-0 flex-1 truncate">{project.name}</span>
-              <span className="ml-2 shrink-0 text-[10px] text-muted-foreground">
-                {PRESET_LABELS[project.preset as PresetName] ?? project.preset}
-                {" · "}
-                {project.savedSites.length}
-              </span>
-            </DropdownMenuRadioItem>
+            <div className="group/project flex items-center gap-0.5" key={project.id}>
+              <DropdownMenuRadioItem className="min-w-0 flex-1" value={project.id}>
+                <span className="min-w-0 flex-1 truncate">{project.name}</span>
+                <span className="shrink-0 text-[10px] text-muted-foreground tabular-nums">
+                  {project.savedSites.length}
+                </span>
+              </DropdownMenuRadioItem>
+              <DropdownMenuItem
+                aria-label={`Rename ${project.name}`}
+                className="size-8 justify-center p-0 text-muted-foreground opacity-50 transition-opacity hover:text-foreground group-hover/project:opacity-100"
+                onClick={() => {
+                  setActionProjectId(project.id);
+                  setNameDraft(project.name);
+                  setMode("renaming");
+                }}
+              >
+                <PencilIcon className="size-3" aria-hidden />
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                aria-label={`Delete ${project.name}`}
+                className="size-8 justify-center p-0 text-muted-foreground opacity-50 transition-opacity hover:text-destructive group-hover/project:opacity-100"
+                onClick={() => {
+                  setActionProjectId(project.id);
+                  setMode("confirmDelete");
+                }}
+              >
+                <Trash2Icon className="size-3" aria-hidden />
+              </DropdownMenuItem>
+            </div>
           ))}
         </DropdownMenuRadioGroup>
 
@@ -354,44 +376,6 @@ export default function ProjectSwitcher() {
           <PlusIcon className="size-3.5" aria-hidden />
           New project
         </DropdownMenuItem>
-
-        {/* Rename and delete act on one project, and as flat siblings of "New
-            project" they gave no clue which — with three projects listed above,
-            "Delete project" was a guess. Naming the target in a heading and
-            reducing the items to bare verbs says it once, unambiguously, and
-            reads shorter than repeating "project" three times.
-
-            The heading is a group label, which Base UI resolves through context
-            and which throws if it is not inside a group — hence the wrapper. */}
-        {active ? (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuGroup>
-              {/* Same uppercase treatment as the "Projects" heading above, so
-                  it reads as a section rather than as one more selectable
-                  project — the rows list names in normal case. */}
-              <DropdownMenuLabel className="truncate text-[10px] uppercase tracking-[0.09em] text-muted-foreground">
-                {active.name}
-              </DropdownMenuLabel>
-              <DropdownMenuItem
-                onClick={() => {
-                  setNameDraft(active.name);
-                  setMode("renaming");
-                }}
-              >
-                <PencilIcon className="size-3.5" aria-hidden />
-                Rename
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => setMode("confirmDelete")}
-                variant="destructive"
-              >
-                <Trash2Icon className="size-3.5" aria-hidden />
-                Delete
-              </DropdownMenuItem>
-            </DropdownMenuGroup>
-          </>
-        ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
   );

@@ -22,8 +22,8 @@ import CompareTray from "./compare-tray";
  *   top-left      what you are looking for, and what is drawn
  *   top-right     the answer, and the priorities that shape it
  *   bottom-left   the colour key, above MapLibre's scale bar
- *   bottom-centre loading and empty-state notices
- *   bottom-right  MapLibre's navigation control and attribution
+ *   bottom-centre loading notices, zoom and tilt
+ *   bottom-right  MapLibre attribution
  *
  * Nothing dodges anything: each floating element owns a corner, and the two
  * that can grow (layers, results) open downward into space no other element

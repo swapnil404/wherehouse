@@ -3,6 +3,7 @@ import { Label } from "@wherehouse/ui/components/label";
 import { Separator } from "@wherehouse/ui/components/separator";
 import { Slider } from "@wherehouse/ui/components/slider";
 import {
+  ChevronDownIcon,
   CircleDashedIcon,
   LayersIcon,
   PencilLineIcon,
@@ -273,15 +274,19 @@ export default function LayersCard() {
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className={`flex items-center gap-2 py-1.5 pr-2.5 pl-3 text-xs font-medium transition-colors hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring/50 focus-visible:outline-none ${panelSurface}`}
+        className={`flex items-center gap-2 py-1.5 pr-2 pl-3 text-xs font-medium transition-colors hover:bg-black/85 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring/50 focus-visible:outline-none ${panelSurface}`}
       >
         <LayersIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-        Layers
+        Map layers
         {activeCount > 0 ? (
           <span className="rounded-full bg-foreground/10 px-1.5 py-px font-mono text-[10px] tabular-nums">
             {activeCount}
           </span>
         ) : null}
+        <ChevronDownIcon
+          className={`size-3 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`}
+          aria-hidden
+        />
       </button>
 
       {open ? (
