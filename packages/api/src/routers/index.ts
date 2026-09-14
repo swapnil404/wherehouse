@@ -6,6 +6,7 @@ import { protectedProcedure, publicProcedure, router } from "../index";
 import { projectsRouter } from "./projects";
 import {
   GeoServiceError,
+  getHealth,
   getHeatmap,
   getHotspots,
   getPresets,
@@ -70,6 +71,20 @@ export const appRouter = router({
   }),
   projects: projectsRouter,
   geo: router({
+    /**
+     * Sidecar warmup probe.
+     *
+     * Public, unlike every other `geo` procedure, because the most valuable
+     * moment to start the spin-up is while someone is typing their password —
+     * by the time they reach the dashboard a ~50s cold start has already been
+     * paid. Gating it behind a session would delay the warmup to precisely the
+     * moment the first real query needs the service.
+     *
+     * Safe to expose: it forwards nothing from the sidecar's reply, returns one
+     * boolean, and hits an endpoint the keep-warm cron already pings every ten
+     * minutes.
+     */
+    health: publicProcedure.query(async () => ({ ready: await getHealth() })),
     catchment: protectedProcedure
       .input(z.object({
         h3Index: resolutionEightH3Schema,

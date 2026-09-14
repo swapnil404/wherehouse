@@ -295,6 +295,22 @@ interface MapStore {
    * the map back to a measure the reader did not ask for.
    */
   gridMeasure: GridMeasure;
+  /**
+   * Counts *user-initiated* changes to the use case and priorities.
+   *
+   * Bumped by `setPreset`, `setWeight` and `resetWeights`, and deliberately not
+   * by `applyProjectSetup`. Loading a project and editing one look identical
+   * from the outside — both leave `preset` and `customWeights` holding new
+   * values — and telling them apart by watching those values means inferring
+   * intent from render timing, which does not work: effects within a commit
+   * still observe the previous render's state, so at the moment a project is
+   * opened the map still reads as the *old* project's setup. Anything
+   * persisting on that signal writes the project you just left over the one you
+   * just opened.
+   *
+   * A counter the map's own actions maintain answers the question directly.
+   */
+  setupRevision: number;
   drawMode: DrawMode | null;
   /**
    * The finished shape, or `null` for the whole city.
@@ -309,6 +325,8 @@ interface MapStore {
   toggleLayer: (id: LayerId) => void;
   setLayerOpacity: (id: LayerId, opacity: number) => void;
   setPreset: (preset: PresetName) => void;
+  /** Restores a saved project's use case and priorities in one update. */
+  applyProjectSetup: (preset: PresetName, weights: Weights) => void;
   setEligibleOnly: (eligibleOnly: boolean) => void;
   setHeatmapStats: (stats: HeatmapStats | null) => void;
   setHotspotStats: (stats: HotspotStats | null) => void;
@@ -360,6 +378,7 @@ export const useMapStore = create<MapStore>((set) => ({
   catchmentMode: "car",
   catchmentMinutes: 20,
   gridMeasure: "score",
+  setupRevision: 0,
   drawMode: null,
   studyArea: null,
   toggleLayer: (id) =>
@@ -380,8 +399,9 @@ export const useMapStore = create<MapStore>((set) => ({
   // Switching use case discards weight edits: carrying a warehouse-tuned
   // zoning weight into retail would silently misrepresent the retail preset.
   setPreset: (preset) =>
-    set({
+    set((state) => ({
       preset,
+      setupRevision: state.setupRevision + 1,
       customWeights: null,
       hotspotStats: null,
       // Both describe the outgoing preset. Subscores and hard constraints are
@@ -393,13 +413,39 @@ export const useMapStore = create<MapStore>((set) => ({
       comparisonSites: [],
       studyAreaSites: null,
       studyAreaScoreStatus: { pending: false, error: null },
+    })),
+  // Opening a project is a preset change *and* a weight change arriving
+  // together, so it has to land in one update — setting them in sequence would
+  // render once with the new preset against the old project's priorities.
+  //
+  // Only clears the preset-specific state when the preset actually moves. A
+  // project that differs from the current map by weights alone leaves the open
+  // selection and the shortlist alone, exactly as dragging a slider does, since
+  // both re-score from cached subscores without a refetch.
+  applyProjectSetup: (preset, weights) =>
+    set((state) => {
+      const customWeights = Object.keys(weights).length > 0 ? weights : null;
+      if (state.preset === preset) return { customWeights };
+      return {
+        preset,
+        customWeights,
+        hotspotStats: null,
+        rankedCells: null,
+        selection: null,
+        selectionOrigin: null,
+        comparisonSites: [],
+        studyAreaSites: null,
+        studyAreaScoreStatus: { pending: false, error: null },
+      };
     }),
   setEligibleOnly: (eligibleOnly) => set({ eligibleOnly }),
   setWeight: (key, value, base) =>
     set((state) => ({
       customWeights: { ...(state.customWeights ?? base), [key]: value },
+      setupRevision: state.setupRevision + 1,
     })),
-  resetWeights: () => set({ customWeights: null }),
+  resetWeights: () =>
+    set((state) => ({ customWeights: null, setupRevision: state.setupRevision + 1 })),
   setRankedCells: (rankedCells) => set({ rankedCells }),
   setSelection: (selection) => set({ selection }),
   toggleComparisonSite: (cell) =>

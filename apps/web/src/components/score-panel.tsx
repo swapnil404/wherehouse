@@ -1,6 +1,7 @@
 import {
   ArrowDownRightIcon,
   ArrowUpRightIcon,
+  BookmarkIcon,
   CarFrontIcon,
   CheckIcon,
   FootprintsIcon,
@@ -82,6 +83,12 @@ interface ScorePanelProps {
   weights: Weights | null;
   compareState: "available" | "added" | "full";
   onToggleCompare: () => void;
+  /**
+   * Saving is the durable sibling of comparing: the tray is this session's
+   * scratch space, a project is what survives the tab closing.
+   */
+  saveState: "available" | "saved" | "full" | "saving";
+  onSave: () => void;
 }
 
 const SCORE_GLYPHS = {
@@ -322,6 +329,8 @@ export default function ScorePanel({
   weights,
   compareState,
   onToggleCompare,
+  saveState,
+  onSave,
 }: ScorePanelProps) {
   const ready = data && analytics && weights;
   const percentile =
@@ -429,6 +438,31 @@ export default function ScorePanel({
               : compareState === "full"
                 ? "Compare tray full"
                 : "Add to compare"}
+          </button>
+
+          {/* Stacked rather than paired side by side. Both labels change with
+              state, and "Remove from compare" next to "Already in project" in
+              a 320px card truncates the two controls into a guess. */}
+          <button
+            className="mt-1.5 flex w-full items-center justify-center gap-2 rounded-md bg-white/10 px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-white/15 focus-visible:ring-1 focus-visible:ring-ring/50 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-45"
+            disabled={saveState !== "available"}
+            onClick={onSave}
+            type="button"
+          >
+            {saveState === "saved" ? (
+              <CheckIcon className="size-3.5" aria-hidden="true" />
+            ) : saveState === "saving" ? (
+              <LoaderCircleIcon className="size-3.5 animate-spin" aria-hidden="true" />
+            ) : (
+              <BookmarkIcon className="size-3.5" aria-hidden="true" />
+            )}
+            {saveState === "saved"
+              ? "Saved to project"
+              : saveState === "full"
+                ? "Project is full"
+                : saveState === "saving"
+                  ? "Saving…"
+                  : "Save to project"}
           </button>
 
           <SiteExportActions

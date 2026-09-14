@@ -3,14 +3,22 @@ import { useEffect, useState } from "react";
 
 import { compositeScore } from "@/lib/cells";
 import { MAX_COMPARE_SITES } from "@/lib/compare";
+import {
+  buildSnapshot,
+  defaultSiteName,
+  MAX_SAVED_SITES,
+  nextSequentialName,
+} from "@/lib/saved-sites";
+import { useProjects } from "@/lib/use-projects";
 import { useMapStore } from "@/stores/map-store";
 
 import { panelSurface } from "./panel-styles";
 import PriorityEditor from "./priority-editor";
 import RankedList from "./ranked-list";
+import SavedSites from "./saved-sites";
 import ScorePanel from "./score-panel";
 
-type Tab = "ranked" | "site" | "tune";
+type Tab = "ranked" | "site" | "tune" | "saved";
 
 /**
  * Floating results card, top-right of the map.
@@ -54,6 +62,7 @@ export default function ResultsDock() {
   const customWeights = useMapStore((s) => s.customWeights);
   const comparisonSites = useMapStore((s) => s.comparisonSites);
   const toggleComparisonSite = useMapStore((s) => s.toggleComparisonSite);
+  const { active, projects, createProject, saveSite } = useProjects();
 
   const weights = customWeights ?? presets?.[preset] ?? null;
 
@@ -118,6 +127,54 @@ export default function ResultsDock() {
       ? "full"
       : "available";
 
+  const alreadySaved = Boolean(
+    selection?.cell
+    && active?.savedSites.some((site) => site.h3Cell === selection.cell?.h3_index),
+  );
+  const saveState = createProject.isPending || saveSite.isPending
+    ? "saving"
+    : alreadySaved
+      ? "saved"
+      : (active?.savedSites.length ?? 0) >= MAX_SAVED_SITES
+        ? "full"
+        : "available";
+
+  /**
+   * Saves into the active project, creating one first if the session has none.
+   *
+   * Creating implicitly rather than disabling the button: the alternative is a
+   * dead control on the one screen where someone has just decided a site is
+   * worth keeping, and the header names the new project the moment it exists,
+   * so nothing happens invisibly.
+   */
+  const handleSave = async () => {
+    const cell = selection?.cell;
+    if (!cell || !weights) return;
+    const score = compositeScore(cell.subscores, weights);
+    if (score === null) return;
+
+    const projectId = active?.id ?? (
+      await createProject.mutateAsync({
+        name: nextSequentialName("Project", projects),
+        preset,
+        weights: weights as Record<string, number>,
+      })
+    )?.id;
+    if (!projectId) return;
+
+    saveSite.mutate({
+      projectId,
+      name: defaultSiteName(active?.savedSites ?? []),
+      // The cell centroid the score was actually computed at, not the raw
+      // click: scoring snaps to the containing hex, so storing the click would
+      // record a point the number never described.
+      latitude: cell.lat,
+      longitude: cell.lon,
+      h3Cell: cell.h3_index,
+      scoreSnapshot: buildSnapshot(cell, preset, weights, score),
+    });
+  };
+
   return (
     // `max-h` with `flex-col` rather than a set height: the card hugs the
     // shortlist's five rows, and only the much longer "This site" tab grows
@@ -135,6 +192,9 @@ export default function ResultsDock() {
         <TabButton active={tab === "tune"} onClick={() => setTab("tune")}>
           Tune
         </TabButton>
+        <TabButton active={tab === "saved"} onClick={() => setTab("saved")}>
+          Saved
+        </TabButton>
 
         <button
           type="button"
@@ -149,6 +209,8 @@ export default function ResultsDock() {
       <div className="scrollbar-subtle min-h-0 overflow-y-auto">
         {tab === "ranked" ? (
           <RankedList />
+        ) : tab === "saved" ? (
+          <SavedSites />
         ) : tab === "tune" ? (
           <div className="p-4">
             <PriorityEditor presetWeights={presets?.[preset] ?? null} alwaysOpen />
@@ -164,6 +226,8 @@ export default function ResultsDock() {
             onToggleCompare={() => {
               if (selection?.cell) toggleComparisonSite(selection.cell);
             }}
+            saveState={saveState}
+            onSave={handleSave}
           />
         )}
       </div>

@@ -1,7 +1,7 @@
 import { QueryCache, QueryClient } from "@tanstack/react-query";
 import { createRouter as createTanStackRouter } from "@tanstack/react-router";
 import { setupRouterSsrQueryIntegration } from "@tanstack/react-router-ssr-query";
-import { createTRPCClient, httpBatchLink } from "@trpc/client";
+import { createTRPCClient, httpBatchLink, httpLink, splitLink } from "@trpc/client";
 import { createTRPCOptionsProxy } from "@trpc/tanstack-react-query";
 import type { AppRouter } from "@wherehouse/api/routers/index";
 import { toast } from "sonner";
@@ -14,6 +14,10 @@ function createQueryClient() {
   return new QueryClient({
     queryCache: new QueryCache({
       onError: (error, query) => {
+        // Background probes report their own state in their own UI. Letting
+        // them through here means a cold analysis sidecar papers the screen
+        // with retry toasts for a request the user never made.
+        if (query.meta?.silent) return;
         toast.error(error.message, {
           action: {
             label: "retry",
@@ -28,16 +32,29 @@ function createQueryClient() {
   });
 }
 
+function withCredentials(url: RequestInfo | URL, options?: RequestInit) {
+  return fetch(url, { ...options, credentials: "include" });
+}
+
+/**
+ * Batching, except for the warmup probe.
+ *
+ * `geo.health` waits on a service that is deliberately allowed to be asleep,
+ * so it can sit for seconds at a time. Batched, it drags whatever shares its
+ * HTTP request down with it — a save or a project list issued in the same tick
+ * finishes no sooner than the probe does, and a probe whose socket dies takes
+ * the whole batch with it. That turns "the analysis engine is warming up" into
+ * "saving hangs and random things error", which is precisely the failure the
+ * probe exists to explain.
+ *
+ * One slow request that blocks nothing is the entire point, so it gets its own.
+ */
 const trpcClient = createTRPCClient<AppRouter>({
   links: [
-    httpBatchLink({
-      url: "/api/trpc",
-      fetch(url, options) {
-        return fetch(url, {
-          ...options,
-          credentials: "include",
-        });
-      },
+    splitLink({
+      condition: (op) => op.path === "geo.health",
+      true: httpLink({ url: "/api/trpc", fetch: withCredentials }),
+      false: httpBatchLink({ url: "/api/trpc", fetch: withCredentials }),
     }),
   ],
 });

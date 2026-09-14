@@ -1,6 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import { MapPinIcon } from "lucide-react";
 
+import ProjectSwitcher from "./project-switcher";
 import UserMenu from "./user-menu";
 
 /**
@@ -35,6 +36,12 @@ export default function Header() {
           <span className="text-white/20">/</span>
           <span className="truncate text-foreground/75">Site intelligence</span>
         </div>
+
+        {/* Next to the location, not next to the account: a project supplies
+            the preset and weights the map is drawn from, so it belongs with
+            the other statements about what is on screen. */}
+        <span className="hidden h-5 w-px bg-white/10 sm:block" aria-hidden />
+        <ProjectSwitcher />
       </div>
 
       <UserMenu />
